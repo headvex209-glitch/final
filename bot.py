@@ -139,8 +139,6 @@ balances: dict         = read_balances()
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  BOT INIT
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-bot = telebot.TeleBot("7483857382:AAFPyTvOQMzm3XFTYpxHg32VrKHKUqfZ0Is") # Replace with your token
-
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  UTILITIES
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
