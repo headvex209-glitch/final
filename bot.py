@@ -2,11 +2,13 @@
 
 import requests
 import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 import datetime
 import os
 import time
 import secrets
 import threading
+import json
 from datetime import timedelta
 from threading import Timer
 import pytz
@@ -19,7 +21,11 @@ bot = telebot.TeleBot(BOT_TOKEN)
 
 ADMIN_IDS = {"7212246299"} # Ensure your ID is here
 
+# ⚠️ REPLACE THIS WITH YOUR ACTUAL API URL ⚠️
 ATTACK_API_URL = "http://YOUR_API_DOMAIN_OR_IP/api/attack?ip={ip}&port={port}&time={time}"
+
+# 🌐 WEB APP URL (Replace with your hosted HTML dashboard later)
+DASHBOARD_URL = "https://core.telegram.org/bots/webapps" 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  PERSISTENT DATA STORAGE (PREVENTS WIPING)
@@ -55,7 +61,6 @@ KEY_PLANS = {
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  FILE HELPERS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 def read_file_lines(filename) -> set:
     try:
         with open(filename, "r") as f: return {l.strip() for l in f if l.strip()}
@@ -182,7 +187,6 @@ def save_balances(balances: dict):
     with open(BALANCE_FILE, "w") as f:
         for uid, bal in balances.items(): f.write(f"{uid}:{bal}\n")
 
-
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  STATE & DATA
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -203,7 +207,6 @@ active_attacks = {}
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  UTILITIES
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 def fmt_expiry(ts: float) -> str:
     return datetime.datetime.fromtimestamp(ts, tz=ist).strftime('%d %b %Y • %I:%M %p IST')
 
@@ -248,10 +251,16 @@ def update_reseller_username(message):
             resellers_data[uid] = new_username
             save_resellers(resellers_data)
 
+# Reusable Profile Builder for text commands and inline buttons
+def build_profile_text(user_id, username_str):
+    role = "👑 Admin" if is_admin(user_id) else ("🤝 Reseller" if is_reseller(user_id) else "👤 User")
+    expiry = f"⏳ <b>Expires:</b> {fmt_expiry(user_access[user_id]['expiry_time'])}" if user_id in user_access else "⏳ <b>Expires:</b> ❌ No Active Plan"
+    bal = f"\n💵 <b>Balance:</b> ₹{get_balance(user_id)}" if is_reseller(user_id) or is_admin(user_id) else ""
+    return f"👤 <b>𝗔𝗖𝗖𝗢𝗨𝗡𝗧 𝗜𝗡𝗙𝗢</b>\n━━━━━━━━━━━━━━━━━━━━━━\n🆔 <b>ID:</b> <code>{user_id}</code>\n📛 <b>Username:</b> {username_str}\n🎭 <b>Role:</b> {role}\n{expiry}{bal}\n━━━━━━━━━━━━━━━━━━━━━━"
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  EXPIRY MANAGEMENT
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 def remove_expired_users():
     current_time = time.time()
     expired = [uid for uid, info in user_access.items() if info["expiry_time"] <= current_time]
@@ -272,7 +281,7 @@ def remove_expired_users():
     Timer(60, remove_expired_users).start()
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  HANDLERS — General & Help
+#  INTERACTIVE UI & HANDLERS (THE 10/10 UPGRADE)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @bot.message_handler(commands=['start'])
@@ -285,16 +294,78 @@ def welcome_start(message):
         save_file_lines(ALL_USERS_FILE, all_known_users)
 
     name = message.from_user.first_name
+    
+    # 🌟 NEW INLINE KEYBOARD MENU
+    markup = InlineKeyboardMarkup(row_width=2)
+    
+    # The Web App Dashboard Button
+    btn_webapp = InlineKeyboardButton("🖥️ Launch Dashboard", web_app=WebAppInfo(url=DASHBOARD_URL))
+    
+    # Standard Action Buttons
+    btn_attack = InlineKeyboardButton("🚀 Quick Attack", callback_data="ui_attack")
+    btn_profile = InlineKeyboardButton("💳 My Profile", callback_data="ui_profile")
+    btn_status = InlineKeyboardButton("📊 Live Status", callback_data="ui_status")
+    btn_redeem = InlineKeyboardButton("🔑 Redeem Key", callback_data="ui_redeem")
+    
+    markup.add(btn_webapp) # Full width
+    markup.add(btn_attack, btn_status)
+    markup.add(btn_profile, btn_redeem)
+
     res = (
         f"🚀 <b>𝗪𝗲𝗹𝗰𝗼𝗺𝗲 𝘁𝗼 𝗣𝗿𝗲𝗺𝗶𝘂𝗺 𝗕𝗼𝘁, {name}!</b> 🚀\n\n"
         "👑 <b>𝗣𝗼𝘄𝗲𝗿𝗳𝘂𝗹 | 𝗦𝗲𝗰𝘂𝗿𝗲 | 𝗙𝗮𝘀𝘁</b>\n\n"
-        "🎯 <code>/attack [ip] [port] [time]</code> - Start Attack\n"
-        "📊 <code>/status</code> - Live Attack Status\n"
-        "📦 <code>/myplan</code> - Check Your Plan\n"
-        "❓ <code>/help</code> - Commands Menu\n\n"
-        "🔥 <i>𝘓𝘦𝘵'𝘴 𝘥𝘦𝘴𝘵𝘳𝘰𝘺 𝘴𝘰𝘮𝘦 𝘴𝘦𝘳𝘃𝘦𝘳𝘴!</i>"
+        "<i>Use the buttons below to control your account, or open the Web Dashboard for full access.</i>"
     )
-    bot.reply_to(message, res, parse_mode="HTML")
+    bot.reply_to(message, res, reply_markup=markup, parse_mode="HTML")
+
+# 🌟 NEW BUTTON CLICK HANDLER
+@bot.callback_query_handler(func=lambda call: True)
+def handle_inline_buttons(call):
+    user_id = str(call.message.chat.id)
+    username_str = f"@{call.from_user.username}" if call.from_user.username else "—"
+
+    if call.data == "ui_profile":
+        profile_text = build_profile_text(user_id, username_str)
+        bot.send_message(user_id, profile_text, parse_mode="HTML")
+        bot.answer_callback_query(call.id)
+        
+    elif call.data == "ui_status":
+        attack_status(call.message) # Calls your existing status function
+        bot.answer_callback_query(call.id)
+        
+    elif call.data == "ui_redeem":
+        bot.send_message(user_id, "🔑 <b>How to redeem a key:</b>\nSimply reply to me with:\n<code>/redeem YOUR_KEY_HERE</code>", parse_mode="HTML")
+        bot.answer_callback_query(call.id)
+        
+    elif call.data == "ui_attack":
+        if user_id not in allowed_user_ids:
+            bot.send_message(user_id, no_access_msg(), parse_mode="HTML")
+        else:
+            bot.send_message(user_id, "🚀 <b>How to launch an attack manually:</b>\nReply to me with the format:\n<code>/attack [IP] [PORT] [TIME]</code>\n\n<i>Example:</i> <code>/attack 1.1.1.1 80 300</code>", parse_mode="HTML")
+        bot.answer_callback_query(call.id)
+
+# 🌐 NEW WEB APP DATA RECEIVER
+@bot.message_handler(content_types=['web_app_data'])
+def handle_webapp_data(message):
+    user_id = str(message.chat.id)
+    if user_id not in allowed_user_ids: return bot.reply_to(message, no_access_msg(), parse_mode="HTML")
+
+    # When the user submits the HTML form, it sends a JSON string.
+    try:
+        data = json.loads(message.web_app_data.data)
+        target = data.get("ip")
+        port = int(data.get("port"))
+        time_val = int(data.get("time"))
+        
+        # Manually construct a message object and pass it to your existing attack handler
+        # To reuse your cooldown/attack logic without writing it twice!
+        mock_msg = message
+        mock_msg.text = f"/attack {target} {port} {time_val}"
+        handle_bgmi(mock_msg) 
+        
+    except Exception as e:
+        bot.reply_to(message, f"❌ Error processing Web App data. Please check your dashboard setup.", parse_mode="HTML")
+
 
 @bot.message_handler(commands=['help'])
 def show_help(message):
@@ -303,7 +374,7 @@ def show_help(message):
         "📋 <b>𝗖𝗢𝗠𝗠𝗔𝗡𝗗𝗦 𝗠𝗘𝗡𝗨</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n\n"
         "👤 <b>USER COMMANDS</b>\n"
-        "🔹 /start    → Welcome screen\n"
+        "🔹 /start    → Open Control Panel\n"
         "🔹 /id       → Account info\n"
         "🔹 /plan     → Plan expiry\n"
         "🔹 /redeem   → Activate a key\n"
@@ -342,12 +413,8 @@ def handle_basic_commands(message):
         bot.reply_to(message, "\n".join(lines), parse_mode="HTML")
         
     elif cmd == '/id':
-        username = f"@{message.from_user.username}" if message.from_user.username else "—"
-        role = "👑 Admin" if is_admin(user_id) else ("🤝 Reseller" if is_reseller(user_id) else "👤 User")
-        expiry = f"⏳ <b>Expires:</b> {fmt_expiry(user_access[user_id]['expiry_time'])}" if user_id in user_access else "⏳ <b>Expires:</b> ❌ No Active Plan"
-        bal = f"\n💵 <b>Balance:</b> ₹{get_balance(user_id)}" if is_reseller(user_id) or is_admin(user_id) else ""
-        res = f"👤 <b>𝗔𝗖𝗖𝗢𝗨𝗡𝗧 𝗜𝗡𝗙𝗢</b>\n━━━━━━━━━━━━━━━━━━━━━━\n🆔 <b>ID:</b> <code>{user_id}</code>\n📛 <b>Username:</b> {username}\n🎭 <b>Role:</b> {role}\n{expiry}{bal}\n━━━━━━━━━━━━━━━━━━━━━━"
-        bot.reply_to(message, res, parse_mode="HTML")
+        username_str = f"@{message.from_user.username}" if message.from_user.username else "—"
+        bot.reply_to(message, build_profile_text(user_id, username_str), parse_mode="HTML")
         
     elif cmd in ['/plan', '/myplan']:
         if user_id not in allowed_user_ids: return bot.reply_to(message, no_access_msg(), parse_mode="HTML")
@@ -498,6 +565,7 @@ def redeem_key(message):
 @bot.message_handler(commands=['genkey'])
 def gen_key(message):
     user_id = str(message.chat.id)
+    username = message.from_user.username
     update_reseller_username(message)
     
     if not is_admin_or_reseller(user_id): return bot.reply_to(message, admin_reseller_only_msg(), parse_mode="HTML")
@@ -994,5 +1062,5 @@ def attack_status(message):
 
 if __name__ == "__main__":
     remove_expired_users()
-    print("   ✅ Bot is running perfectly with API and Broadcast Fix")
+    print("   ✅ Bot is running perfectly with UI Buttons and WebApp Framework!")
     bot.infinity_polling(timeout=30, long_polling_timeout=20)
