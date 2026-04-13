@@ -397,7 +397,6 @@ def redeem_key(message):
     plan_label = ""
     now = datetime.datetime.now(ist)
 
-    # Check Standard Keys
     if key in active_keys:
         plan_label = active_keys[key]
         duration_sec = KEY_PLANS[plan_label]["duration"].total_seconds()
@@ -407,7 +406,6 @@ def redeem_key(message):
             trial_users.remove(user_id)
             save_file_lines(TRIAL_USERS_FILE, trial_users)
 
-    # Check Trial Keys
     elif key in trial_keys:
         t_data = trial_keys[key]
         if user_id in t_data["used_by"]:
@@ -425,7 +423,6 @@ def redeem_key(message):
     else:
         return bot.reply_to(message, "❌ <b>𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗞𝗘𝗬</b>\nThe key is incorrect or has already been used.", parse_mode="HTML")
 
-    # Stack time if existing
     if user_id in user_access and user_access[user_id]["expiry_time"] > now.timestamp():
         current_exp = datetime.datetime.fromtimestamp(user_access[user_id]["expiry_time"])
         expiry_ts = (current_exp + timedelta(seconds=duration_sec)).timestamp()
@@ -612,8 +609,10 @@ def handle_balance_changes(message):
         return bot.reply_to(message, f"⚠️ <b>Usage:</b> <code>{cmd} &lt;userId&gt; &lt;amount&gt;</code>", parse_mode="HTML")
 
     target = parts[1]
-    try: amount = int(parts[2])
-    except ValueError: return bot.reply_to(message, "❌ Amount must be a valid number.", parse_mode="HTML")
+    try:
+        amount = int(parts[2])
+    except ValueError:
+        return bot.reply_to(message, "❌ Amount must be a valid number.", parse_mode="HTML")
 
     if target not in RESELLER_IDS: return bot.reply_to(message, "❌ This user is not a reseller.", parse_mode="HTML")
 
@@ -673,7 +672,8 @@ def add_user(message):
         allowed_user_ids.append(target)
         with open(USER_FILE, "a") as f: f.write(f"{target}\n")
         prefix = "✅ <b>User Added</b>"
-    else: prefix = "🔄 <b>Access Updated</b>"
+    else:
+        prefix = "🔄 <b>Access Updated</b>"
 
     user_access[target] = {"expiry_time": expiry_ts}
     save_user_access(user_access)
@@ -763,11 +763,29 @@ def clear_logs_cmd(message):
 def send_database_files(message):
     if not is_admin(str(message.chat.id)): return
     
-    files_to_send = [
-        USER_ACCESS_FILE, KEYS_FILE, RESELLERS_FILE, 
-        BALANCE_FILE, ALL_USERS_FILE, TRIAL_KEYS_FILE, 
-        TRIAL_USERS_FILE, LOG_FILE
-    ]
+    summary_path = os.path.join(DATA_DIR, "Human_Readable_Summary.txt")
+    with open(summary_path, "w", encoding="utf-8") as sf:
+        sf.write("========== 📊 EASY READ DATABASE SUMMARY ==========\n")
+        sf.write(f"Generated: {datetime.datetime.now(ist).strftime('%d %b %Y %I:%M %p')}\n\n")
+        
+        sf.write("🤝 RESELLER BALANCES & STATS\n")
+        sf.write("-" * 40 + "\n")
+        if not RESELLER_IDS: sf.write("No resellers found.\n")
+        for uid in RESELLER_IDS:
+            sf.write(f"ID: {uid} | Leftover Balance: ₹{get_balance(uid)} | Keys Generated: {count_keys_generated_by(uid)}\n")
+        
+        sf.write("\n👤 ACTIVE PREMIUM USERS\n")
+        sf.write("-" * 40 + "\n")
+        if not user_access: sf.write("No active paid users.\n")
+        for uid, info in user_access.items(): sf.write(f"ID: {uid} | Expiry: {fmt_expiry(info['expiry_time'])}\n")
+            
+        sf.write("\n🔑 UNUSED GENERATED KEYS\n")
+        sf.write("-" * 40 + "\n")
+        if not active_keys: sf.write("No unused keys available.\n")
+        for k, p in active_keys.items(): sf.write(f"Plan: {p.ljust(8)} | Key: {k}\n")
+
+    files_to_send = [summary_path, USER_ACCESS_FILE, KEYS_FILE, RESELLERS_FILE, BALANCE_FILE, ALL_USERS_FILE, TRIAL_KEYS_FILE, TRIAL_USERS_FILE, LOG_FILE]
+    
     bot.reply_to(message, "📦 <b>Fetching Database Files...</b>", parse_mode="HTML")
     found_files = False
     for fp in files_to_send:
@@ -787,8 +805,8 @@ def handle_broadcast(message):
     if len(parts) < 2: return bot.reply_to(message, f"⚠️ <b>Usage:</b> <code>{cmd} &lt;message&gt;</code>", parse_mode="HTML")
     
     targets = list(RESELLER_IDS) if cmd == '/bcreseller' else (allowed_user_ids if cmd == '/bcpaid' else list(all_known_users | set(allowed_user_ids) | RESELLER_IDS | ADMIN_IDS))
-    text = f"📢 <b>𝗕𝗥𝗢𝗔𝗗𝗖𝗔𝗦𝗧 𝗠𝗘𝗦𝗦𝗔𝗚𝗘</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n{parts[1]}\n\n━━━━━━━━━━━━━━━━━━━━━━"
     
+    text = f"📢 <b>𝗕𝗥𝗢𝗔𝗗𝗖𝗔𝗦𝗧 𝗠𝗘𝗦𝗦𝗔𝗚𝗘</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n{parts[1]}\n\n━━━━━━━━━━━━━━━━━━━━━━"
     success, fail = 0, 0
     for t in targets:
         try:
@@ -796,6 +814,7 @@ def handle_broadcast(message):
             success += 1
             time.sleep(0.1) 
         except: fail += 1
+
     bot.reply_to(message, f"📢 <b>Broadcast Done</b>\n✅ Sent: {success}\n❌ Failed: {fail}", parse_mode="HTML")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -863,5 +882,5 @@ def attack_status(message):
 
 if __name__ == "__main__":
     remove_expired_users()
-    print("   ✅ Bot is running perfectly with API and Persistent Storage")
+    print("   ✅ Bot is running perfectly with API, Storage, and Get Data Command")
     bot.infinity_polling(timeout=30, long_polling_timeout=20)
