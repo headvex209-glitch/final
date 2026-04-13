@@ -993,7 +993,9 @@ def handle_bgmi(message):
                     bot.reply_to(message, response)
                     return
                 # Update the last time the user ran the command
-   
+# Fix permission for SAM binary
+import stat
+os.chmod("SAM", stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)   
     # Creating an empty dictionary
     bgmi_cooldown = {}
     bgmi_cooldown[user_id] = datetime.datetime.now()
