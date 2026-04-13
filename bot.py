@@ -19,18 +19,24 @@ bot = telebot.TeleBot(BOT_TOKEN)
 
 ADMIN_IDS = {"7212246299"} # Ensure your ID is here
 
+# ⚠️ REPLACE THIS WITH YOUR ACTUAL API URL ⚠️
 ATTACK_API_URL = "http://YOUR_API_DOMAIN_OR_IP/api/attack?ip={ip}&port={port}&time={time}"
 
-# Files
-USER_FILE        = "users.txt"
-LOG_FILE         = "log.txt"
-USER_ACCESS_FILE = "users_access.txt"
-KEYS_FILE        = "keys.txt"
-RESELLERS_FILE   = "resellers.txt"
-BALANCE_FILE     = "balances.txt"
-ALL_USERS_FILE   = "all_users.txt"
-TRIAL_KEYS_FILE  = "trial_keys.txt"
-TRIAL_USERS_FILE = "trial_users.txt"
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  PERSISTENT DATA STORAGE (PREVENTS WIPING)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DATA_DIR = "/data" if os.path.exists("/data") else "data"
+os.makedirs(DATA_DIR, exist_ok=True)
+
+USER_FILE        = os.path.join(DATA_DIR, "users.txt")
+LOG_FILE         = os.path.join(DATA_DIR, "log.txt")
+USER_ACCESS_FILE = os.path.join(DATA_DIR, "users_access.txt")
+KEYS_FILE        = os.path.join(DATA_DIR, "keys.txt")
+RESELLERS_FILE   = os.path.join(DATA_DIR, "resellers.txt")
+BALANCE_FILE     = os.path.join(DATA_DIR, "balances.txt")
+ALL_USERS_FILE   = os.path.join(DATA_DIR, "all_users.txt")
+TRIAL_KEYS_FILE  = os.path.join(DATA_DIR, "trial_keys.txt")
+TRIAL_USERS_FILE = os.path.join(DATA_DIR, "trial_users.txt")
 
 ist = pytz.timezone('Asia/Kolkata')
 
@@ -391,7 +397,6 @@ def redeem_key(message):
     plan_label = ""
     now = datetime.datetime.now(ist)
 
-    # Check Standard Keys
     if key in active_keys:
         plan_label = active_keys[key]
         duration_sec = KEY_PLANS[plan_label]["duration"].total_seconds()
@@ -401,7 +406,6 @@ def redeem_key(message):
             trial_users.remove(user_id)
             save_file_lines(TRIAL_USERS_FILE, trial_users)
 
-    # Check Trial Keys
     elif key in trial_keys:
         t_data = trial_keys[key]
         if user_id in t_data["used_by"]:
@@ -419,7 +423,6 @@ def redeem_key(message):
     else:
         return bot.reply_to(message, "❌ <b>𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗞𝗘𝗬</b>\nThe key is incorrect or has already been used.", parse_mode="HTML")
 
-    # Stack time if existing
     if user_id in user_access and user_access[user_id]["expiry_time"] > now.timestamp():
         current_exp = datetime.datetime.fromtimestamp(user_access[user_id]["expiry_time"])
         expiry_ts = (current_exp + timedelta(seconds=duration_sec)).timestamp()
@@ -552,7 +555,7 @@ def admin_reports(message):
     
     if cmd == '/paidusers':
         paid = [u for u in allowed_user_ids if u not in trial_users]
-        if not paid: return bot.reply_to(message, "⚠️ No paid users found.")
+        if not paid: return bot.reply_to(message, "⚠️ No paid users found.", parse_mode="HTML")
         lines = ["💎 <b>𝗣𝗔𝗜𝗗 𝗨𝗦𝗘𝗥𝗦</b>\n━━━━━━━━━━━━━━━━━━━━━━"]
         for uid in paid:
             exp = fmt_expiry(user_access[uid]['expiry_time']) if uid in user_access else "No expiry"
@@ -561,13 +564,13 @@ def admin_reports(message):
         
     elif cmd == '/freeusers':
         free = [u for u in all_known_users if u not in allowed_user_ids]
-        if not free: return bot.reply_to(message, "⚠️ No free users found.")
+        if not free: return bot.reply_to(message, "⚠️ No free users found.", parse_mode="HTML")
         lines = [f"🆓 <b>𝗙𝗥𝗘𝗘 𝗨𝗦𝗘𝗥𝗦 ({len(free)})</b>\n━━━━━━━━━━━━━━━━━━━━━━"]
         for uid in free: lines.append(f"🆔 <code>{uid}</code>")
         bot.reply_to(message, "\n".join(lines)[:4000], parse_mode="HTML")
         
     elif cmd == '/resellerstats':
-        if not RESELLER_IDS: return bot.reply_to(message, "⚠️ No resellers found.")
+        if not RESELLER_IDS: return bot.reply_to(message, "⚠️ No resellers found.", parse_mode="HTML")
         lines = ["📊 <b>𝗥𝗘𝗦𝗘𝗟𝗟𝗘𝗥 𝗦𝗧𝗔𝗧𝗦</b>\n━━━━━━━━━━━━━━━━━━━━━━"]
         for uid in RESELLER_IDS:
             lines.append(f"🆔 <code>{uid}</code>\n💵 Bal: ₹{get_balance(uid)} | 🔑 Keys Gen: {count_keys_generated_by(uid)}\n")
@@ -588,7 +591,7 @@ def admin_commands(message):
         "🤝 <b>RESELLERS</b>\n"
         "🔸 <code>/addreseller &lt;id&gt; [bal]</code> | <code>/rmreseller &lt;id&gt;</code>\n"
         "🔸 <code>/resellerstats</code>\n"
-        "🔸 <code>/addbalance &lt;id&gt; &lt;₹&gt;</code> | <code>/setbalance &lt;id&gt; &lt;₹&gt;</code>\n\n"
+        "🔸 <code>/addbalance &lt;id&gt; &lt;amount&gt;</code> | <code>/setbalance &lt;id&gt; &lt;amount&gt;</code>\n\n"
         "📢 <b>BROADCAST & LOGS</b>\n"
         "🔊 <code>/broadcast &lt;msg&gt;</code> | <code>/bcpaid</code> | <code>/bcreseller</code>\n"
         "📄 <code>/logs</code> | 🗑 <code>/clearlogs</code>\n"
@@ -682,29 +685,6 @@ def add_user(message):
     log_action(user_id, f"Added user={target} plan={plan}", message)
     bot.reply_to(message, f"{prefix}\n🆔 <b>ID:</b> <code>{target}</code>\n⏳ <b>Expires:</b> {fmt_expiry(expiry_ts)}", parse_mode="HTML")
 
-@bot.message_handler(commands=['extendall'])
-def extend_all(message):
-    user_id = str(message.chat.id)
-    if not is_admin(user_id): return bot.reply_to(message, admin_only_msg(), parse_mode="HTML")
-    parts = message.text.split()
-    if len(parts) < 3: return bot.reply_to(message, "⚠️ <b>Usage:</b> <code>/extendall &lt;num&gt; &lt;hours/days&gt;</code>", parse_mode="HTML")
-    
-    amount = int(parts[1])
-    unit = parts[2].lower()
-    time_to_add = timedelta(hours=amount) if "hour" in unit else (timedelta(days=amount) if "day" in unit else None)
-    if not time_to_add: return bot.reply_to(message, "❌ Unit must be 'hours' or 'days'.")
-
-    users_extended = 0
-    now = time.time()
-    for uid in list(user_access.keys()):
-        if user_access[uid]["expiry_time"] > now:
-            dt = datetime.datetime.fromtimestamp(user_access[uid]["expiry_time"])
-            user_access[uid]["expiry_time"] = (dt + time_to_add).timestamp()
-            users_extended += 1
-            
-    save_user_access(user_access)
-    bot.reply_to(message, f"🎉 <b>𝗧𝗶𝗺𝗲 𝗘𝘅𝘁𝗲𝗻𝗱𝗲𝗱 𝗳𝗼𝗿 𝗔𝗟𝗟 𝗨𝘀𝗲𝗿𝘀!</b>\n\n⏰ <b>Added:</b> {amount} {unit}\n👥 <b>Users Updated:</b> {users_extended}\n\n<i>Enjoy!</i>", parse_mode="HTML")
-
 @bot.message_handler(commands=['remove', 'rmreseller'])
 def remove_targets(message):
     user_id = str(message.chat.id)
@@ -747,7 +727,7 @@ def send_logs(message):
         try:
             with open(LOG_FILE, "rb") as f: bot.send_document(message.chat.id, f, visible_file_name="bot_logs.txt")
         except Exception as e: bot.reply_to(message, f"❌ Error sending logs: {e}")
-    else: bot.reply_to(message, "⚠️ Logs are empty.")
+    else: bot.reply_to(message, "⚠️ Logs are empty.", parse_mode="HTML")
 
 @bot.message_handler(commands=['clearlogs'])
 def clear_logs_cmd(message):
@@ -844,5 +824,5 @@ def attack_status(message):
 
 if __name__ == "__main__":
     remove_expired_users()
-    print("   ✅ Bot is running perfectly with API")
+    print("   ✅ Bot is running perfectly with API and Data Storage")
     bot.infinity_polling(timeout=30, long_polling_timeout=20)
