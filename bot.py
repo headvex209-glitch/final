@@ -490,6 +490,56 @@ def gen_key(message):
     )
     bot.reply_to(message, res, parse_mode="HTML")
 
+@bot.message_handler(commands=['listkeys'])
+def list_keys(message):
+    user_id = str(message.chat.id)
+    if not is_admin_or_reseller(user_id): return bot.reply_to(message, admin_reseller_only_msg(), parse_mode="HTML")
+    if not active_keys: return bot.reply_to(message, "⚠️ No unused keys available.", parse_mode="HTML")
+    
+    lines = ["🔑 <b>𝗨𝗡𝗨𝗦𝗘𝗗 𝗞𝗘𝗬𝗦</b>\n━━━━━━━━━━━━━━━━━━━━━━"]
+    for k, plan in active_keys.items(): lines.append(f"🔸 <code>{k}</code> [{plan}]")
+    bot.reply_to(message, "\n".join(lines)[:4000], parse_mode="HTML")
+
+@bot.message_handler(commands=['deletekey'])
+def delete_key(message):
+    user_id = str(message.chat.id)
+    if not is_admin_or_reseller(user_id): return bot.reply_to(message, admin_reseller_only_msg(), parse_mode="HTML")
+    parts = message.text.split()
+    if len(parts) < 2: return bot.reply_to(message, "⚠️ <b>Usage:</b> <code>/deletekey &lt;key&gt;</code>", parse_mode="HTML")
+    
+    key = parts[1].strip().upper()
+    if key in active_keys:
+        del active_keys[key]
+        save_keys(active_keys)
+        bot.reply_to(message, f"✅ <b>Key successfully deleted.</b>", parse_mode="HTML")
+    else:
+        bot.reply_to(message, "❌ Key not found.", parse_mode="HTML")
+
+@bot.message_handler(commands=['balance'])
+def check_balance(message):
+    user_id = str(message.chat.id)
+    parts = message.text.split()
+    
+    if is_admin(user_id) and len(parts) > 1:
+        target = parts[1]
+        return bot.reply_to(message, f"💰 <b>Reseller <code>{target}</code> Balance:</b> ₹{get_balance(target)}", parse_mode="HTML")
+
+    if is_reseller(user_id) or is_admin(user_id):
+        return bot.reply_to(message, f"💰 <b>Your Balance:</b> ₹{get_balance(user_id)}", parse_mode="HTML")
+        
+    bot.reply_to(message, "❌ You are not a reseller.", parse_mode="HTML")
+
+@bot.message_handler(commands=['resellers'])
+def list_resellers(message):
+    user_id = str(message.chat.id)
+    if not is_admin(user_id): return bot.reply_to(message, admin_only_msg(), parse_mode="HTML")
+    if not RESELLER_IDS: return bot.reply_to(message, "⚠️ No resellers found.", parse_mode="HTML")
+    
+    lines = ["🤝 <b>𝗥𝗘𝗦𝗘𝗟𝗟𝗘𝗥𝗦</b>\n━━━━━━━━━━━━━━━━━━━━━━"]
+    for uid in RESELLER_IDS: lines.append(f"🆔 <code>{uid}</code> → ₹{get_balance(uid)}")
+    bot.reply_to(message, "\n".join(lines)[:4000], parse_mode="HTML")
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  ADMIN REPORTING & MANAGEMENT
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -677,6 +727,18 @@ def remove_targets(message):
             RESELLER_IDS.discard(target)
             save_file_lines(RESELLERS_FILE, RESELLER_IDS)
             bot.reply_to(message, f"✅ <b>Reseller <code>{target}</code> removed.</b>", parse_mode="HTML")
+
+@bot.message_handler(commands=['allusers'])
+def show_all_users(message):
+    user_id = str(message.chat.id)
+    if not is_admin(user_id): return bot.reply_to(message, admin_only_msg(), parse_mode="HTML")
+    if not allowed_user_ids: return bot.reply_to(message, "⚠️ No authorized users.", parse_mode="HTML")
+    
+    lines = ["👥 <b>𝗔𝗨𝗧𝗛𝗢𝗥𝗜𝗭𝗘𝗗 𝗨𝗦𝗘𝗥𝗦</b>\n━━━━━━━━━━━━━━━━━━━━━━"]
+    for uid in allowed_user_ids:
+        expiry_info = f" [{fmt_expiry(user_access[uid]['expiry_time'])}]" if uid in user_access else " [No expiry]"
+        lines.append(f"🆔 <code>{uid}</code>{expiry_info}")
+    bot.reply_to(message, "\n".join(lines)[:4000], parse_mode="HTML")
 
 @bot.message_handler(commands=['logs'])
 def send_logs(message):
