@@ -24,7 +24,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 bot = telebot.TeleBot(BOT_TOKEN)
 
 API_KEY = "YOUR_EXTERNAL_API_KEY"
-ADMIN_IDS = {"7212246299"}
+ADMIN_IDS = {"7212246299"} # Ensure your ID is here
 
 USER_FILE        = "users.txt"
 LOG_FILE         = "log.txt"
@@ -32,7 +32,7 @@ USER_ACCESS_FILE = "users_access.txt"
 KEYS_FILE        = "keys.txt"
 RESELLERS_FILE   = "resellers.txt"
 BALANCE_FILE     = "balances.txt"
-ALL_USERS_FILE   = "all_users.txt" # NEW: Tracks everyone who clicks /start
+ALL_USERS_FILE   = "all_users.txt" # Tracks everyone who clicks /start
 
 ist = pytz.timezone('Asia/Kolkata')
 
@@ -148,8 +148,8 @@ def save_balances(balances: dict):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  STATE & COOLDOWN
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-all_known_users: set   = read_all_users() # Tracks everyone
-allowed_user_ids: list = read_users()     # Tracks paid users
+all_known_users: set   = read_all_users()
+allowed_user_ids: list = read_users()
 user_access: dict      = read_user_access()
 active_keys: dict      = read_keys()
 RESELLER_IDS: set      = read_resellers()
@@ -178,6 +178,7 @@ def is_admin_or_reseller(uid: str) -> bool:
 def get_balance(uid: str) -> int:
     return balances.get(uid, 0)
 
+# Single-line log action
 def log_action(user_id: str, action: str, message=None):
     if message and message.from_user.username:
         username = f"@{message.from_user.username}"
@@ -233,7 +234,6 @@ def remove_expired_users():
 @bot.message_handler(commands=['start'])
 def welcome_start(message):
     user_id = str(message.chat.id)
-    # Save user to global list if new
     if user_id not in all_known_users:
         all_known_users.add(user_id)
         save_all_users(all_known_users)
@@ -313,6 +313,31 @@ def show_plan(message):
     else:
         bot.reply_to(message, "⚠️ No expiry info found.")
 
+@bot.message_handler(commands=['mylogs'])
+def show_my_logs(message):
+    user_id = str(message.chat.id)
+    username_str = f"@{message.from_user.username}" if message.from_user.username else None
+    
+    if user_id not in allowed_user_ids:
+        return bot.reply_to(message, no_access_msg())
+        
+    try:
+        with open(LOG_FILE, "r") as f:
+            lines = f.readlines()
+            
+        user_logs = []
+        for l in lines:
+            if f"ID:{user_id}" in l or (username_str and username_str in l):
+                user_logs.append(l.strip())
+                
+        if user_logs:
+            recent_logs = "\n".join(user_logs[-15:])
+            bot.reply_to(message, f"━━━━━━━━━━━━━━━━━━━━━━\n    📋  YOUR ACTIVITY\n━━━━━━━━━━━━━━━━━━━━━━\n\n{recent_logs}\n\n━━━━━━━━━━━━━━━━━━━━━━")
+        else:
+            bot.reply_to(message, "No activity found for your account.")
+    except FileNotFoundError:
+        bot.reply_to(message, "No logs found.")
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  KEY SYSTEM
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -321,7 +346,6 @@ def show_plan(message):
 def redeem_key(message):
     user_id = str(message.chat.id)
     
-    # Save to known users just in case
     if user_id not in all_known_users:
         all_known_users.add(user_id)
         save_all_users(all_known_users)
@@ -486,7 +510,10 @@ def admin_commands(message):
         "📢 BROADCASTING\n"
         "/broadcast <msg>      Send to EVERYONE\n"
         "/bcpaid <msg>         Send to PAID users\n"
-        "/bcreseller <msg>     Send to RESELLERS\n"
+        "/bcreseller <msg>     Send to RESELLERS\n\n"
+        "📝 LOGS\n"
+        "/logs                 Get log file\n"
+        "/clearlogs            Wipe logs\n"
     )
 
 @bot.message_handler(commands=['add'])
@@ -511,7 +538,6 @@ def add_user(message):
     user_access[target] = {"expiry_time": expiry_ts}
     save_user_access(user_access)
     
-    # Save to global known list too
     if target not in all_known_users:
         all_known_users.add(target)
         save_all_users(all_known_users)
@@ -586,6 +612,25 @@ def list_resellers(message):
     for uid in RESELLER_IDS: lines.append(f"ID: {uid} → ₹{get_balance(uid)}")
     bot.reply_to(message, "\n".join(lines)[:4000])
 
+@bot.message_handler(commands=['logs'])
+def send_logs(message):
+    user_id = str(message.chat.id)
+    if not is_admin(user_id): return
+    if os.path.exists(LOG_FILE) and os.stat(LOG_FILE).st_size > 0:
+        with open(LOG_FILE, "rb") as f:
+            bot.send_document(message.chat.id, f)
+
+@bot.message_handler(commands=['clearlogs'])
+def clear_logs_cmd(message):
+    user_id = str(message.chat.id)
+    if not is_admin(user_id): return
+    
+    if os.path.exists(LOG_FILE):
+        open(LOG_FILE, "w").close()
+        bot.reply_to(message, "✅ Logs cleared.")
+    else:
+        bot.reply_to(message, "No logs to clear.")
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  TARGETED BROADCASTING SYSTEM
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -598,7 +643,6 @@ def execute_broadcast(sender_message, target_list, prefix_msg):
     text = f"📢 𝗕𝗥𝗢𝗔𝗗𝗖𝗔𝗦𝗧\n\n{parts[1]}"
     success, fail = 0, 0
     
-    # Send message to everyone in the list
     for target in target_list:
         try:
             bot.send_message(target, text)
@@ -613,8 +657,6 @@ def execute_broadcast(sender_message, target_list, prefix_msg):
 def broadcast_all(message):
     user_id = str(message.chat.id)
     if not is_admin(user_id): return bot.reply_to(message, admin_only_msg())
-    
-    # Compile list of literally everyone the bot knows about
     all_targets = list(all_known_users | set(allowed_user_ids) | RESELLER_IDS | ADMIN_IDS)
     execute_broadcast(message, all_targets, "Broadcast to ALL USERS")
 
@@ -629,7 +671,6 @@ def broadcast_reseller(message):
     user_id = str(message.chat.id)
     if not is_admin(user_id): return bot.reply_to(message, admin_only_msg())
     execute_broadcast(message, list(RESELLER_IDS), "Broadcast to RESELLERS")
-
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  ATTACK SYSTEM (Threaded)
@@ -667,13 +708,16 @@ def handle_bgmi(message):
 
         bgmi_cooldown[user_id] = datetime.datetime.now()
         
+        # Log it as a single line
+        log_action(user_id, f"Attack → IP: {target} | Port: {port} | Time: {time_val}s", message)
+        
         username = message.from_user.username if message.from_user.username else message.from_user.first_name
         bot.reply_to(message, f"{username}, 🚀 𝗔𝘁𝘁𝗮𝗰𝗸 𝗦𝘁𝗮𝗿𝘁𝗲𝗱 🚀\n\nTarget: {target}\nPort: {port}\nDuration: {time_val}s")
         
         threading.Thread(target=run_attack_background, args=(message.chat.id, target, port, time_val)).start()
 
     else:
-        bot.reply_to(message, "✅ Usage: /attack <ip> <port> <time>")
+        bot.reply_to(message, "✅ Usage: /attack [ip] [port] [time]")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  ENTRY POINT
