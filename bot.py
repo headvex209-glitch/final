@@ -397,6 +397,7 @@ def redeem_key(message):
     plan_label = ""
     now = datetime.datetime.now(ist)
 
+    # Check Standard Keys
     if key in active_keys:
         plan_label = active_keys[key]
         duration_sec = KEY_PLANS[plan_label]["duration"].total_seconds()
@@ -406,6 +407,7 @@ def redeem_key(message):
             trial_users.remove(user_id)
             save_file_lines(TRIAL_USERS_FILE, trial_users)
 
+    # Check Trial Keys
     elif key in trial_keys:
         t_data = trial_keys[key]
         if user_id in t_data["used_by"]:
@@ -423,6 +425,7 @@ def redeem_key(message):
     else:
         return bot.reply_to(message, "❌ <b>𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗞𝗘𝗬</b>\nThe key is incorrect or has already been used.", parse_mode="HTML")
 
+    # Stack time if existing
     if user_id in user_access and user_access[user_id]["expiry_time"] > now.timestamp():
         current_exp = datetime.datetime.fromtimestamp(user_access[user_id]["expiry_time"])
         expiry_ts = (current_exp + timedelta(seconds=duration_sec)).timestamp()
@@ -438,7 +441,6 @@ def redeem_key(message):
 
     log_action(user_id, f"Redeemed key | plan={plan_label}", message)
     bot.reply_to(message, f"✅ <b>𝗞𝗘𝗬 𝗔𝗖𝗧𝗜𝗩𝗔𝗧𝗘𝗗 𝗦𝗨𝗖𝗖𝗘𝗦𝗦𝗙𝗨𝗟𝗟𝗬!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n📦 <b>Plan:</b> {plan_label}\n⏳ <b>Expires:</b> {fmt_expiry(expiry_ts)}\n\n<i>Enjoy your access!</i> 🎉", parse_mode="HTML")
-
 
 @bot.message_handler(commands=['genkey'])
 def gen_key(message):
@@ -542,7 +544,6 @@ def list_resellers(message):
     for uid in RESELLER_IDS: lines.append(f"🆔 <code>{uid}</code> → ₹{get_balance(uid)}")
     bot.reply_to(message, "\n".join(lines)[:4000], parse_mode="HTML")
 
-
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  ADMIN REPORTING & MANAGEMENT
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -591,10 +592,11 @@ def admin_commands(message):
         "🤝 <b>RESELLERS</b>\n"
         "🔸 <code>/addreseller &lt;id&gt; [bal]</code> | <code>/rmreseller &lt;id&gt;</code>\n"
         "🔸 <code>/resellerstats</code>\n"
-        "🔸 <code>/addbalance &lt;id&gt; &lt;amount&gt;</code> | <code>/setbalance &lt;id&gt; &lt;amount&gt;</code>\n\n"
-        "📢 <b>BROADCAST & LOGS</b>\n"
+        "🔸 <code>/addbalance &lt;id&gt; &lt;₹&gt;</code> | <code>/setbalance &lt;id&gt; &lt;₹&gt;</code>\n\n"
+        "📢 <b>BROADCAST & DATA</b>\n"
         "🔊 <code>/broadcast &lt;msg&gt;</code> | <code>/bcpaid</code> | <code>/bcreseller</code>\n"
         "📄 <code>/logs</code> | 🗑 <code>/clearlogs</code>\n"
+        "📦 <code>/getdata</code> (Download DB Files)\n"
         "━━━━━━━━━━━━━━━━━━━━━━",
         parse_mode="HTML"
     )
@@ -610,10 +612,8 @@ def handle_balance_changes(message):
         return bot.reply_to(message, f"⚠️ <b>Usage:</b> <code>{cmd} &lt;userId&gt; &lt;amount&gt;</code>", parse_mode="HTML")
 
     target = parts[1]
-    try:
-        amount = int(parts[2])
-    except ValueError:
-        return bot.reply_to(message, "❌ Amount must be a valid number.", parse_mode="HTML")
+    try: amount = int(parts[2])
+    except ValueError: return bot.reply_to(message, "❌ Amount must be a valid number.", parse_mode="HTML")
 
     if target not in RESELLER_IDS: return bot.reply_to(message, "❌ This user is not a reseller.", parse_mode="HTML")
 
@@ -673,8 +673,7 @@ def add_user(message):
         allowed_user_ids.append(target)
         with open(USER_FILE, "a") as f: f.write(f"{target}\n")
         prefix = "✅ <b>User Added</b>"
-    else:
-        prefix = "🔄 <b>Access Updated</b>"
+    else: prefix = "🔄 <b>Access Updated</b>"
 
     user_access[target] = {"expiry_time": expiry_ts}
     save_user_access(user_access)
@@ -684,6 +683,29 @@ def add_user(message):
 
     log_action(user_id, f"Added user={target} plan={plan}", message)
     bot.reply_to(message, f"{prefix}\n🆔 <b>ID:</b> <code>{target}</code>\n⏳ <b>Expires:</b> {fmt_expiry(expiry_ts)}", parse_mode="HTML")
+
+@bot.message_handler(commands=['extendall'])
+def extend_all(message):
+    user_id = str(message.chat.id)
+    if not is_admin(user_id): return bot.reply_to(message, admin_only_msg(), parse_mode="HTML")
+    parts = message.text.split()
+    if len(parts) < 3: return bot.reply_to(message, "⚠️ <b>Usage:</b> <code>/extendall &lt;num&gt; &lt;hours/days&gt;</code>", parse_mode="HTML")
+    
+    amount = int(parts[1])
+    unit = parts[2].lower()
+    time_to_add = timedelta(hours=amount) if "hour" in unit else (timedelta(days=amount) if "day" in unit else None)
+    if not time_to_add: return bot.reply_to(message, "❌ Unit must be 'hours' or 'days'.")
+
+    users_extended = 0
+    now = time.time()
+    for uid in list(user_access.keys()):
+        if user_access[uid]["expiry_time"] > now:
+            dt = datetime.datetime.fromtimestamp(user_access[uid]["expiry_time"])
+            user_access[uid]["expiry_time"] = (dt + time_to_add).timestamp()
+            users_extended += 1
+            
+    save_user_access(user_access)
+    bot.reply_to(message, f"🎉 <b>𝗧𝗶𝗺𝗲 𝗘𝘅𝘁𝗲𝗻𝗱𝗲𝗱 𝗳𝗼𝗿 𝗔𝗟𝗟 𝗨𝘀𝗲𝗿𝘀!</b>\n\n⏰ <b>Added:</b> {amount} {unit}\n👥 <b>Users Updated:</b> {users_extended}\n\n<i>Enjoy!</i>", parse_mode="HTML")
 
 @bot.message_handler(commands=['remove', 'rmreseller'])
 def remove_targets(message):
@@ -737,6 +759,24 @@ def clear_logs_cmd(message):
         bot.reply_to(message, "✅ <b>Logs completely wiped.</b>", parse_mode="HTML")
     else: bot.reply_to(message, "⚠️ No logs to clear.", parse_mode="HTML")
 
+@bot.message_handler(commands=['getdata'])
+def send_database_files(message):
+    if not is_admin(str(message.chat.id)): return
+    
+    files_to_send = [
+        USER_ACCESS_FILE, KEYS_FILE, RESELLERS_FILE, 
+        BALANCE_FILE, ALL_USERS_FILE, TRIAL_KEYS_FILE, 
+        TRIAL_USERS_FILE, LOG_FILE
+    ]
+    bot.reply_to(message, "📦 <b>Fetching Database Files...</b>", parse_mode="HTML")
+    found_files = False
+    for fp in files_to_send:
+        if os.path.exists(fp) and os.stat(fp).st_size > 0:
+            with open(fp, "rb") as f: bot.send_document(message.chat.id, f, visible_file_name=os.path.basename(fp))
+            found_files = True
+            
+    if not found_files: bot.reply_to(message, "⚠️ <b>No data files found yet.</b>", parse_mode="HTML")
+
 @bot.message_handler(commands=['broadcast', 'bcpaid', 'bcreseller'])
 def handle_broadcast(message):
     user_id = str(message.chat.id)
@@ -747,8 +787,8 @@ def handle_broadcast(message):
     if len(parts) < 2: return bot.reply_to(message, f"⚠️ <b>Usage:</b> <code>{cmd} &lt;message&gt;</code>", parse_mode="HTML")
     
     targets = list(RESELLER_IDS) if cmd == '/bcreseller' else (allowed_user_ids if cmd == '/bcpaid' else list(all_known_users | set(allowed_user_ids) | RESELLER_IDS | ADMIN_IDS))
-    
     text = f"📢 <b>𝗕𝗥𝗢𝗔𝗗𝗖𝗔𝗦𝗧 𝗠𝗘𝗦𝗦𝗔𝗚𝗘</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n{parts[1]}\n\n━━━━━━━━━━━━━━━━━━━━━━"
+    
     success, fail = 0, 0
     for t in targets:
         try:
@@ -756,7 +796,6 @@ def handle_broadcast(message):
             success += 1
             time.sleep(0.1) 
         except: fail += 1
-
     bot.reply_to(message, f"📢 <b>Broadcast Done</b>\n✅ Sent: {success}\n❌ Failed: {fail}", parse_mode="HTML")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -824,5 +863,5 @@ def attack_status(message):
 
 if __name__ == "__main__":
     remove_expired_users()
-    print("   ✅ Bot is running perfectly with API and Data Storage")
+    print("   ✅ Bot is running perfectly with API and Persistent Storage")
     bot.infinity_polling(timeout=30, long_polling_timeout=20)
