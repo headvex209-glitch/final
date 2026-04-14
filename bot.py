@@ -238,7 +238,7 @@ def cancel_cmd(message):
     bot.reply_to(message, "✅ There is no active operation to cancel.", parse_mode="HTML")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  EXPIRY MANAGEMENT (RESTORED)
+#  EXPIRY MANAGEMENT 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 def remove_expired_users():
     current_time = time.time()
@@ -414,7 +414,6 @@ def execute_redeem(message, key):
 
     log_action(user_id, f"Redeemed key | plan={plan_label}", message)
     bot.reply_to(message, f"✅ <b>𝗞𝗘𝗬 𝗔𝗖𝗧𝗜𝗩𝗔𝗧𝗘𝗗!</b>\n📦 <b>Plan:</b> {plan_label}\n⏳ <b>Expires:</b> {fmt_expiry(expiry_ts)}\n\n<i>Click /start to open the dashboard!</i>", parse_mode="HTML")
-
 
 @bot.message_handler(commands=['attack'])
 def attack_cmd(message):
@@ -599,7 +598,7 @@ def admin_commands(message):
         "🛠 <b>𝗔𝗗𝗠𝗜𝗡 𝗖𝗢𝗠𝗠𝗔𝗡𝗗𝗦</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
         "👤 <b>USERS</b>\n🔹 /add | /remove\n🔹 /paidusers | /freeusers\n🔹 /extendall\n🔹 /trialkey | /killtrial\n\n"
         "🤝 <b>RESELLERS</b>\n🔸 /addreseller | /rmreseller\n🔸 /resellerstats | /resellers\n🔸 /addbalance | /setbalance\n\n"
-        "📢 <b>BROADCAST & DATA</b>\n🔊 /broadcast | /bcpaid | /bcreseller\n📄 /logs | 🗑 /clearlogs\n📦 /getdata (Download Full Ledger)\n━━━━━━━━━━━━━━━━━━━━━━",
+        "📢 <b>BROADCAST & DATA</b>\n🔊 /broadcast | /bcpaid | /bcreseller\n📄 /logs | 🗑 /clearlogs\n📦 /getdata (Download Full Ledger)\n⚠️ /clearalldata (Wipe Database)\n━━━━━━━━━━━━━━━━━━━━━━",
         parse_mode="HTML"
     )
 
@@ -653,19 +652,27 @@ def execute_remove(message, cmd, target):
 def addreseller_cmd(message):
     if not is_admin(str(message.chat.id)): return bot.reply_to(message, admin_only_msg(), parse_mode="HTML")
     parts = message.text.split()
-    if len(parts) >= 4: execute_addreseller(message, parts[1], parts[2], parts[3])
+    if len(parts) >= 3: execute_addreseller(message, parts[1], parts[2])
     else:
-        msg = bot.reply_to(message, "🤝 <b>Enter the new Reseller ID:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
-        bot.register_next_step_handler(msg, lambda m: bot.register_next_step_handler(bot.reply_to(m, "💰 <b>Enter Initial Balance:</b>", parse_mode="HTML"), lambda m2: bot.register_next_step_handler(bot.reply_to(m2, "📛 <b>Enter their @username:</b>", parse_mode="HTML"), lambda m3: execute_addreseller(m3, m.text.strip(), m2.text.strip(), m3.text.strip()) if not is_cancel(m3) else None) if not is_cancel(m2) else None) if not is_cancel(m) else None)
+        msg = bot.reply_to(message, "🤝 <b>Enter the new Reseller's Telegram ID:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
+        bot.register_next_step_handler(msg, lambda m: bot.register_next_step_handler(bot.reply_to(m, "💰 <b>Enter Initial Balance:</b>", parse_mode="HTML"), lambda m2: execute_addreseller(m2, m.text.strip(), m2.text.strip()) if not is_cancel(m2) else None) if not is_cancel(m) else None)
 
-def execute_addreseller(message, target, bal_str, username):
+def execute_addreseller(message, target, bal_str):
     try: initial_bal = int(bal_str)
     except ValueError: return bot.reply_to(message, "❌ Balance must be a number.", parse_mode="HTML")
-    resellers_data[target] = username
+    
+    # Auto-saves username as "Unknown" until they use the bot
+    resellers_data[target] = "Unknown"
     balances[target] = get_balance(target) + initial_bal
     save_resellers(resellers_data); save_balances(balances)
     log_action(str(message.chat.id), f"Added reseller={target} with {initial_bal}", message)
-    bot.reply_to(message, f"✅ <b>Reseller Added!</b>\n👤 <b>Username:</b> {username}\n🆔 <b>ID:</b> <code>{target}</code>\n💵 <b>Starting Balance:</b> ₹{balances[target]}", parse_mode="HTML")
+    
+    bot.reply_to(message, f"✅ <b>Reseller Added!</b>\n🆔 <b>ID:</b> <code>{target}</code>\n💵 <b>Starting Balance:</b> ₹{balances[target]}\n<i>(Username will auto-update when they use the bot)</i>", parse_mode="HTML")
+    
+    try:
+        bot.send_message(target, f"💰 <b>𝗬𝗼𝘂 𝗔𝗿𝗲 𝗣𝗿𝗼𝗺𝗼𝘁𝗲𝗱 𝗧𝗼 𝗥𝗲𝘀𝗲𝗹𝗹𝗲𝗿!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n💵 <b>Balance:</b> ₹{balances[target]}\n🔑 <b>Total Keys Generated:</b> 0\n\n📋 <i>Use /prices to see key prices</i>\n🔑 <i>Use /genkey to generate</i>", parse_mode="HTML")
+    except Exception as e:
+        bot.reply_to(message, f"⚠️ Note: Promotion message wasn't sent to the user. They need to start the bot first.", parse_mode="HTML")
 
 @bot.message_handler(commands=['addbalance', 'setbalance'])
 def addbalance_cmd(message):
@@ -718,23 +725,42 @@ def execute_extendall(message, amount_str, unit):
 @bot.message_handler(commands=['broadcast', 'bcpaid', 'bcreseller'])
 def broadcast_cmd(message):
     if not is_admin(str(message.chat.id)): return bot.reply_to(message, admin_only_msg(), parse_mode="HTML")
-    cmd, parts = message.text.split()[0].lower(), message.text.split(maxsplit=1)
-    if len(parts) > 1: execute_broadcast(message, cmd, parts[1])
+    cmd = message.text.split()[0].lower()
+    parts = message.text.split(maxsplit=1)
+    
+    if len(parts) > 1:
+        execute_broadcast(message, cmd, parts[1])
     else:
         msg = bot.reply_to(message, "📢 <b>Enter the message to broadcast:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
-        bot.register_next_step_handler(msg, lambda m: execute_broadcast(m, cmd, m.text) if not is_cancel(m) else None)
+        bot.register_next_step_handler(msg, broadcast_step, cmd)
+
+def broadcast_step(message, cmd):
+    if is_cancel(message): return
+    execute_broadcast(message, cmd, message.text)
 
 def execute_broadcast(message, cmd, text_content):
-    if cmd == '/bcreseller': targets = list(resellers_data.keys())
-    elif cmd == '/bcpaid': targets = allowed_user_ids
-    else: targets = list(all_known_users | set(allowed_user_ids) | set(resellers_data.keys()) | ADMIN_IDS)
-    
+    if cmd == '/bcreseller':
+        targets = set(resellers_data.keys())
+    elif cmd == '/bcpaid':
+        targets = set(allowed_user_ids)
+    else:
+        targets = all_known_users | set(allowed_user_ids) | set(resellers_data.keys()) | ADMIN_IDS
+
+    targets = list(targets)
     text = f"📢 <b>𝗕𝗥𝗢𝗔𝗗𝗖𝗔𝗦𝗧</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n{text_content}\n\n━━━━━━━━━━━━━━━━━━━━━━"
+    
+    bot.reply_to(message, f"⏳ <i>Broadcasting to {len(targets)} users in progress...</i>", parse_mode="HTML")
     success, fail = 0, 0
-    bot.reply_to(message, "⏳ <i>Broadcasting in progress...</i>", parse_mode="HTML")
+    
     for t in targets:
-        try: bot.send_message(t, text, parse_mode="HTML"); success += 1; time.sleep(0.1) 
-        except: fail += 1
+        try:
+            bot.send_message(t, text, parse_mode="HTML")
+            success += 1
+            time.sleep(0.05) 
+        except Exception as e:
+            print(f"Broadcast failed for {t}: {e}")
+            fail += 1
+
     bot.reply_to(message, f"📢 <b>Broadcast Done</b>\n✅ Sent: {success}\n❌ Failed: {fail}", parse_mode="HTML")
 
 @bot.message_handler(commands=['paidusers', 'freeusers', 'resellerstats'])
@@ -785,6 +811,39 @@ def send_database_files(message):
             found = True
     if not found: bot.reply_to(message, "⚠️ <b>No data files found yet.</b>", parse_mode="HTML")
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  DANGER ZONE: WIPE DATABASE
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@bot.message_handler(commands=['clearalldata'])
+def clearalldata_cmd(message):
+    if not is_admin(str(message.chat.id)): return
+    msg = bot.reply_to(message, "⚠️ <b>WARNING: EXTREME DANGER</b> ⚠️\nThis will wipe ALL users, resellers, balances, and keys. This cannot be undone.\n\nType exactly <code>CONFIRM WIPE</code> to proceed, or /cancel to abort.", parse_mode="HTML")
+    bot.register_next_step_handler(msg, clearalldata_step)
+
+def clearalldata_step(message):
+    if is_cancel(message): return
+    if message.text.strip() == "CONFIRM WIPE":
+        # Clear in-memory sets & dicts
+        all_known_users.clear()
+        trial_users.clear()
+        allowed_user_ids.clear()
+        user_access.clear()
+        active_keys.clear()
+        key_history.clear()
+        resellers_data.clear()
+        trial_keys.clear()
+        balances.clear()
+        
+        # Clear physical files
+        files_to_wipe = [USER_FILE, LOG_FILE, USER_ACCESS_FILE, KEYS_FILE, KEY_HISTORY_FILE, RESELLERS_FILE, BALANCE_FILE, ALL_USERS_FILE, TRIAL_KEYS_FILE, TRIAL_USERS_FILE]
+        for f in files_to_wipe:
+            if os.path.exists(f): open(f, 'w').close()
+            
+        bot.reply_to(message, "✅ <b>DATABASE COMPLETELY WIPED.</b> Everything has been reset to zero.", parse_mode="HTML")
+        log_action(str(message.chat.id), "EXECUTED FULL DATABASE WIPE", message)
+    else:
+        bot.reply_to(message, "🚫 <b>Confirmation failed. Wipe cancelled.</b>", parse_mode="HTML")
+
 @bot.message_handler(commands=['logs'])
 def send_logs(message):
     if not is_admin(str(message.chat.id)): return
@@ -802,5 +861,5 @@ def clear_logs_cmd(message):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 if __name__ == "__main__":
     remove_expired_users()
-    print("   ✅ Bot is running perfectly with Fully Conversational Admin Handlers!")
+    print("   ✅ Bot is running perfectly with Broadcast Fixed & ClearData Secure!")
     bot.infinity_polling(timeout=30, long_polling_timeout=20)
