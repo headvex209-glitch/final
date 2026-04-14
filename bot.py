@@ -238,6 +238,28 @@ def cancel_cmd(message):
     bot.reply_to(message, "✅ There is no active operation to cancel.", parse_mode="HTML")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  EXPIRY MANAGEMENT (RESTORED)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def remove_expired_users():
+    current_time = time.time()
+    expired = [uid for uid, info in user_access.items() if info["expiry_time"] <= current_time]
+
+    for uid in expired:
+        try: bot.send_message(uid, "⏰ <b>Your access plan has expired!</b>\nUse <code>/redeem</code> to reactivate.", parse_mode="HTML")
+        except: pass
+        user_access.pop(uid, None)
+        if uid in allowed_user_ids: allowed_user_ids.remove(uid)
+        if uid in trial_users:
+            trial_users.remove(uid)
+            save_file_lines(TRIAL_USERS_FILE, trial_users)
+
+    if expired:
+        save_users(allowed_user_ids)
+        save_user_access(user_access)
+
+    Timer(60, remove_expired_users).start()
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  UI & DASHBOARD MENU
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @bot.message_handler(commands=['start'])
