@@ -24,7 +24,7 @@ ADMIN_IDS = {"7212246299"} # Ensure your ID is here
 # ⚠️ REPLACE THIS WITH YOUR ACTUAL API URL ⚠️
 ATTACK_API_URL = "http://YOUR_API_DOMAIN_OR_IP/api/attack?ip={ip}&port={port}&time={time}"
 
-# 🌐 WEB APP URL (Replace with your hosted HTML dashboard later)
+# 🌐 WEB APP URL (Replace with your hosted HTML dashboard)
 DASHBOARD_URL = "https://core.telegram.org/bots/webapps" 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -251,7 +251,6 @@ def update_reseller_username(message):
             resellers_data[uid] = new_username
             save_resellers(resellers_data)
 
-# Reusable Profile Builder for text commands and inline buttons
 def build_profile_text(user_id, username_str):
     role = "👑 Admin" if is_admin(user_id) else ("🤝 Reseller" if is_reseller(user_id) else "👤 User")
     expiry = f"⏳ <b>Expires:</b> {fmt_expiry(user_access[user_id]['expiry_time'])}" if user_id in user_access else "⏳ <b>Expires:</b> ❌ No Active Plan"
@@ -281,7 +280,7 @@ def remove_expired_users():
     Timer(60, remove_expired_users).start()
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  INTERACTIVE UI & HANDLERS (THE 10/10 UPGRADE)
+#  INTERACTIVE UI & HANDLERS 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @bot.message_handler(commands=['start'])
@@ -295,30 +294,39 @@ def welcome_start(message):
 
     name = message.from_user.first_name
     
-    # 🌟 NEW INLINE KEYBOARD MENU
     markup = InlineKeyboardMarkup(row_width=2)
     
-    # The Web App Dashboard Button
-    btn_webapp = InlineKeyboardButton("🖥️ Launch Dashboard", web_app=WebAppInfo(url=DASHBOARD_URL))
+    # STRICT REAL-TIME SECURITY CHECK
+    is_paid = user_id in allowed_user_ids and user_id in user_access and user_access[user_id]["expiry_time"] > time.time()
     
-    # Standard Action Buttons
+    # Dashboard is ONLY generated if the user is actively paid
+    if is_paid:
+        btn_webapp = InlineKeyboardButton("🖥️ Launch Dashboard", web_app=WebAppInfo(url=DASHBOARD_URL))
+        markup.add(btn_webapp)
+    
     btn_attack = InlineKeyboardButton("🚀 Quick Attack", callback_data="ui_attack")
     btn_profile = InlineKeyboardButton("💳 My Profile", callback_data="ui_profile")
     btn_status = InlineKeyboardButton("📊 Live Status", callback_data="ui_status")
     btn_redeem = InlineKeyboardButton("🔑 Redeem Key", callback_data="ui_redeem")
     
-    markup.add(btn_webapp) # Full width
     markup.add(btn_attack, btn_status)
     markup.add(btn_profile, btn_redeem)
 
-    res = (
-        f"🚀 <b>𝗪𝗲𝗹𝗰𝗼𝗺𝗲 𝘁𝗼 𝗣𝗿𝗲𝗺𝗶𝘂𝗺 𝗕𝗼𝘁, {name}!</b> 🚀\n\n"
-        "👑 <b>𝗣𝗼𝘄𝗲𝗿𝗳𝘂𝗹 | 𝗦𝗲𝗰𝘂𝗿𝗲 | 𝗙𝗮𝘀𝘁</b>\n\n"
-        "<i>Use the buttons below to control your account, or open the Web Dashboard for full access.</i>"
-    )
+    if is_paid:
+        res = (
+            f"🚀 <b>𝗪𝗲𝗹𝗰𝗼𝗺𝗲 𝗯𝗮𝗰𝗸, {name}!</b> 🚀\n\n"
+            "👑 <b>𝗣𝗿𝗲𝗺𝗶𝘂𝗺 𝗔𝗰𝗰𝗲𝘀𝘀 𝗔𝗰𝘁𝗶𝘃𝗲</b>\n\n"
+            "<i>Use the buttons below to control your account, or open your exclusive Web Dashboard!</i>"
+        )
+    else:
+        res = (
+            f"🚀 <b>𝗪𝗲𝗹𝗰𝗼𝗺𝗲 𝘁𝗼 𝗣𝗿𝗲𝗺𝗶𝘂𝗺 𝗕𝗼𝘁, {name}!</b> 🚀\n\n"
+            "⛔ <b>𝗡𝗼 𝗔𝗰𝘁𝗶𝘃𝗲 𝗣𝗹𝗮𝗻</b>\n\n"
+            "<i>You need a premium key to use the attack dashboard. Please click 'Redeem Key' below to activate your access!</i>"
+        )
+
     bot.reply_to(message, res, reply_markup=markup, parse_mode="HTML")
 
-# 🌟 NEW BUTTON CLICK HANDLER
 @bot.callback_query_handler(func=lambda call: True)
 def handle_inline_buttons(call):
     user_id = str(call.message.chat.id)
@@ -330,7 +338,7 @@ def handle_inline_buttons(call):
         bot.answer_callback_query(call.id)
         
     elif call.data == "ui_status":
-        attack_status(call.message) # Calls your existing status function
+        attack_status(call.message) 
         bot.answer_callback_query(call.id)
         
     elif call.data == "ui_redeem":
@@ -338,34 +346,37 @@ def handle_inline_buttons(call):
         bot.answer_callback_query(call.id)
         
     elif call.data == "ui_attack":
-        if user_id not in allowed_user_ids:
+        is_paid = user_id in allowed_user_ids and user_id in user_access and user_access[user_id]["expiry_time"] > time.time()
+        if not is_paid:
             bot.send_message(user_id, no_access_msg(), parse_mode="HTML")
         else:
             bot.send_message(user_id, "🚀 <b>How to launch an attack manually:</b>\nReply to me with the format:\n<code>/attack [IP] [PORT] [TIME]</code>\n\n<i>Example:</i> <code>/attack 1.1.1.1 80 300</code>", parse_mode="HTML")
         bot.answer_callback_query(call.id)
 
-# 🌐 NEW WEB APP DATA RECEIVER
+# 🌐 WEB APP SECURE DATA RECEIVER
 @bot.message_handler(content_types=['web_app_data'])
 def handle_webapp_data(message):
     user_id = str(message.chat.id)
-    if user_id not in allowed_user_ids: return bot.reply_to(message, no_access_msg(), parse_mode="HTML")
+    
+    # 🔒 REAL-TIME SECURITY CHECK
+    # This mathematically guarantees the URL cannot be abused. Even if they have the link, 
+    # if their ID isn't currently paid up to the millisecond, it drops the request.
+    if user_id not in allowed_user_ids or user_id not in user_access or user_access[user_id]["expiry_time"] < time.time():
+        return bot.reply_to(message, no_access_msg(), parse_mode="HTML")
 
-    # When the user submits the HTML form, it sends a JSON string.
     try:
         data = json.loads(message.web_app_data.data)
         target = data.get("ip")
         port = int(data.get("port"))
         time_val = int(data.get("time"))
         
-        # Manually construct a message object and pass it to your existing attack handler
-        # To reuse your cooldown/attack logic without writing it twice!
+        # Pass to the secure attack handler
         mock_msg = message
         mock_msg.text = f"/attack {target} {port} {time_val}"
         handle_bgmi(mock_msg) 
         
     except Exception as e:
         bot.reply_to(message, f"❌ Error processing Web App data. Please check your dashboard setup.", parse_mode="HTML")
-
 
 @bot.message_handler(commands=['help'])
 def show_help(message):
@@ -510,7 +521,6 @@ def redeem_key(message):
     plan_label = ""
     now = datetime.datetime.now(ist)
 
-    # Check Standard Keys
     if key in active_keys:
         plan_label = active_keys[key]
         duration_sec = KEY_PLANS[plan_label]["duration"].total_seconds()
@@ -526,7 +536,6 @@ def redeem_key(message):
             trial_users.remove(user_id)
             save_file_lines(TRIAL_USERS_FILE, trial_users)
 
-    # Check Trial Keys
     elif key in trial_keys:
         t_data = trial_keys[key]
         if user_id in t_data["used_by"]:
@@ -544,7 +553,6 @@ def redeem_key(message):
     else:
         return bot.reply_to(message, "❌ <b>𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗞𝗘𝗬</b>\nThe key is incorrect or has already been used.", parse_mode="HTML")
 
-    # Stack time if existing
     if user_id in user_access and user_access[user_id]["expiry_time"] > now.timestamp():
         current_exp = datetime.datetime.fromtimestamp(user_access[user_id]["expiry_time"])
         expiry_ts = (current_exp + timedelta(seconds=duration_sec)).timestamp()
@@ -559,7 +567,7 @@ def redeem_key(message):
     save_user_access(user_access)
 
     log_action(user_id, f"Redeemed key | plan={plan_label}", message)
-    bot.reply_to(message, f"✅ <b>𝗞𝗘𝗬 𝗔𝗖𝗧𝗜𝗩𝗔𝗧𝗘𝗗 𝗦𝗨𝗖𝗖𝗘𝗦𝗦𝗙𝗨𝗟𝗟𝗬!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n📦 <b>Plan:</b> {plan_label}\n⏳ <b>Expires:</b> {fmt_expiry(expiry_ts)}\n\n<i>Enjoy your access!</i> 🎉", parse_mode="HTML")
+    bot.reply_to(message, f"✅ <b>𝗞𝗘𝗬 𝗔𝗖𝗧𝗜𝗩𝗔𝗧𝗘𝗗 𝗦𝗨𝗖𝗖𝗘𝗦𝗦𝗙𝗨𝗟𝗟𝗬!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n📦 <b>Plan:</b> {plan_label}\n⏳ <b>Expires:</b> {fmt_expiry(expiry_ts)}\n\n<i>Enjoy your access! Click /start to launch the dashboard.</i> 🎉", parse_mode="HTML")
 
 
 @bot.message_handler(commands=['genkey'])
@@ -597,7 +605,6 @@ def gen_key(message):
         k = generate_key()
         active_keys[k] = plan
         
-        # Save to permanent history
         key_history[k] = {"plan": plan, "creator": user_id, "status": "UNUSED"}
         generated_keys.append(k)
         
@@ -628,7 +635,6 @@ def list_keys(message):
     update_reseller_username(message)
     if not is_admin_or_reseller(user_id): return bot.reply_to(message, admin_reseller_only_msg(), parse_mode="HTML")
     
-    # Show keys generated by THIS user (or all if admin)
     user_unused_keys = {k: p for k, p in active_keys.items() if is_admin(user_id) or (k in key_history and key_history[k]["creator"] == user_id)}
     
     if not user_unused_keys: return bot.reply_to(message, "⚠️ No unused keys available.", parse_mode="HTML")
@@ -934,7 +940,6 @@ def send_database_files(message):
             sf.write(f"Reseller: {username} (ID: {uid})\n")
             sf.write(f"Leftover Balance: ₹{get_balance(uid)}\n")
             
-            # Find keys generated by this reseller
             r_keys = {k: v for k, v in key_history.items() if v["creator"] == uid}
             unused = [k for k, v in r_keys.items() if v["status"] == "UNUSED"]
             used = [k for k, v in r_keys.items() if str(v["status"]).startswith("USED")]
@@ -1015,7 +1020,9 @@ def handle_bgmi(message):
     user_id = str(message.chat.id)
     update_reseller_username(message)
     
-    if user_id not in allowed_user_ids: return bot.reply_to(message, no_access_msg(), parse_mode="HTML")
+    # 🔒 REAL-TIME SECURITY CHECK
+    if user_id not in allowed_user_ids or user_id not in user_access or user_access[user_id]["expiry_time"] < time.time():
+        return bot.reply_to(message, no_access_msg(), parse_mode="HTML")
 
     if not is_admin(user_id):
         if user_id in bgmi_cooldown:
@@ -1062,5 +1069,5 @@ def attack_status(message):
 
 if __name__ == "__main__":
     remove_expired_users()
-    print("   ✅ Bot is running perfectly with UI Buttons and WebApp Framework!")
+    print("   ✅ Bot is running perfectly with UI Buttons and Real-Time Security!")
     bot.infinity_polling(timeout=30, long_polling_timeout=20)
