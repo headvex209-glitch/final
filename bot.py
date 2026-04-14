@@ -14,10 +14,10 @@ from threading import Timer
 import pytz
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  CONFIG
+#  CONFIG (Optimized Threading)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-bot = telebot.TeleBot(BOT_TOKEN)
+bot = telebot.TeleBot(BOT_TOKEN, threaded=True, num_threads=32)
 
 ADMIN_IDS = {"7212246299"} # Ensure your ID is here
 
@@ -226,16 +226,32 @@ def build_profile_text(user_id, username_str):
 
 def is_cancel(message):
     if not message.text:
+        bot.clear_step_handler_by_chat_id(message.chat.id)
         bot.reply_to(message, "🚫 <b>Invalid input. Operation cancelled.</b>", parse_mode="HTML")
         return True
     if message.text.startswith('/'):
+        bot.clear_step_handler_by_chat_id(message.chat.id)
         bot.reply_to(message, "🚫 <b>Operation cancelled.</b>", parse_mode="HTML")
         return True
     return False
 
 @bot.message_handler(commands=['cancel'])
 def cancel_cmd(message):
-    bot.reply_to(message, "✅ There is no active operation to cancel.", parse_mode="HTML")
+    bot.clear_step_handler_by_chat_id(message.chat.id)
+    bot.reply_to(message, "✅ Active operations cancelled.", parse_mode="HTML")
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  PAGINATION ENGINE (SCALABILITY)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def gen_page_markup(prefix, current_page, total_pages):
+    markup = InlineKeyboardMarkup()
+    row = []
+    if current_page > 0:
+        row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"{prefix}_{current_page - 1}"))
+    if current_page < total_pages - 1:
+        row.append(InlineKeyboardButton("Next ➡️", callback_data=f"{prefix}_{current_page + 1}"))
+    if row: markup.add(*row)
+    return markup
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  EXPIRY MANAGEMENT 
@@ -289,7 +305,7 @@ def welcome_start(message):
 
     bot.reply_to(message, res, reply_markup=markup, parse_mode="HTML")
 
-@bot.callback_query_handler(func=lambda call: True)
+@bot.callback_query_handler(func=lambda call: call.data.startswith("ui_"))
 def handle_inline_buttons(call):
     user_id = str(call.message.chat.id)
     username_str = f"@{call.from_user.username}" if call.from_user.username else "—"
@@ -508,7 +524,11 @@ def genkey_plan_step(message):
     plan = message.text.strip()
     if plan not in KEY_PLANS: return bot.reply_to(message, "❌ Invalid plan. Operation cancelled.", parse_mode="HTML")
     msg = bot.reply_to(message, "🔢 <b>How many keys do you want to generate?</b> (Enter 1 to 50)", parse_mode="HTML")
-    bot.register_next_step_handler(msg, lambda m: execute_genkey(m, plan, m.text.strip()) if not is_cancel(m) else None)
+    bot.register_next_step_handler(msg, genkey_amount_step, plan)
+
+def genkey_amount_step(message, plan):
+    if is_cancel(message): return
+    execute_genkey(message, plan, message.text.strip())
 
 def execute_genkey(message, plan, amount_str):
     user_id = str(message.chat.id)
@@ -536,16 +556,6 @@ def execute_genkey(message, plan, amount_str):
     
     bot.reply_to(message, f"🔑 <b>𝗞𝗘𝗬(𝗦) 𝗚𝗘𝗡𝗘𝗥𝗔𝗧𝗘𝗗!</b>\n\n" + "\n".join([f"<code>{k}</code>" for k in gen_keys]) + f"\n\n📦 <b>Plan:</b> {plan}\n💰 <b>Cost:</b> ₹{total_cost}", parse_mode="HTML")
 
-@bot.message_handler(commands=['listkeys'])
-def list_keys(message):
-    user_id = str(message.chat.id)
-    if not is_admin_or_reseller(user_id): return bot.reply_to(message, admin_reseller_only_msg(), parse_mode="HTML")
-    user_unused_keys = {k: p for k, p in active_keys.items() if is_admin(user_id) or (k in key_history and key_history[k]["creator"] == user_id)}
-    if not user_unused_keys: return bot.reply_to(message, "⚠️ No unused keys available.", parse_mode="HTML")
-    lines = ["🔑 <b>𝗨𝗡𝗨𝗦𝗘𝗗 𝗞𝗘𝗬𝗦</b>\n━━━━━━━━━━━━━━━━━━━━━━"]
-    for k, plan in user_unused_keys.items(): lines.append(f"🔸 <code>{k}</code> [{plan}]")
-    bot.reply_to(message, "\n".join(lines)[:4000], parse_mode="HTML")
-
 @bot.message_handler(commands=['deletekey'])
 def delete_key_cmd(message):
     user_id = str(message.chat.id)
@@ -554,7 +564,11 @@ def delete_key_cmd(message):
     if len(parts) > 1: execute_deletekey(message, parts[1])
     else:
         msg = bot.reply_to(message, "🗑️ <b>Enter the key you want to delete:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
-        bot.register_next_step_handler(msg, lambda m: execute_deletekey(m, m.text.strip()) if not is_cancel(m) else None)
+        bot.register_next_step_handler(msg, deletekey_step)
+
+def deletekey_step(message):
+    if is_cancel(message): return
+    execute_deletekey(message, message.text.strip())
 
 def execute_deletekey(message, key_str):
     user_id, key = str(message.chat.id), key_str.upper()
@@ -580,13 +594,60 @@ def check_balance(message):
         return bot.reply_to(message, f"💰 <b>Your Balance:</b> ₹{get_balance(user_id)}", parse_mode="HTML")
     bot.reply_to(message, "❌ You are not a reseller.", parse_mode="HTML")
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  PAGINATED LIST COMMANDS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@bot.message_handler(commands=['listkeys'])
+def listkeys_cmd(message):
+    user_id = str(message.chat.id)
+    if not is_admin_or_reseller(user_id): return bot.reply_to(message, admin_reseller_only_msg(), parse_mode="HTML")
+    user_unused_keys = {k: p for k, p in active_keys.items() if is_admin(user_id) or (k in key_history and key_history[k]["creator"] == user_id)}
+    if not user_unused_keys: return bot.reply_to(message, "⚠️ No unused keys available.", parse_mode="HTML")
+    send_listkeys_page(message.chat.id, list(user_unused_keys.items()), 0)
+
+def send_listkeys_page(chat_id, keys_list, page, message_id=None):
+    per_page = 15
+    total_pages = max(1, (len(keys_list) + per_page - 1) // per_page)
+    page_items = keys_list[page*per_page : (page+1)*per_page]
+    
+    text = f"🔑 <b>𝗨𝗡𝗨𝗦𝗘𝗗 𝗞𝗘𝗬𝗦 (Page {page+1}/{total_pages})</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
+    for k, plan in page_items: text += f"🔸 <code>{k}</code> [{plan}]\n"
+    
+    markup = gen_page_markup("keypage", page, total_pages)
+    if message_id: bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode="HTML")
+    else: bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("keypage_"))
+def keypage_callback(call):
+    page = int(call.data.split("_")[1])
+    user_id = str(call.message.chat.id)
+    user_unused_keys = {k: p for k, p in active_keys.items() if is_admin(user_id) or (k in key_history and key_history[k]["creator"] == user_id)}
+    send_listkeys_page(call.message.chat.id, list(user_unused_keys.items()), page, call.message.message_id)
+    bot.answer_callback_query(call.id)
+
 @bot.message_handler(commands=['resellers'])
-def list_resellers(message):
+def resellers_cmd(message):
     if not is_admin(str(message.chat.id)): return bot.reply_to(message, admin_only_msg(), parse_mode="HTML")
     if not resellers_data: return bot.reply_to(message, "⚠️ No resellers found.", parse_mode="HTML")
-    lines = ["🤝 <b>𝗥𝗘𝗦𝗘𝗟𝗟𝗘𝗥𝗦</b>\n━━━━━━━━━━━━━━━━━━━━━━"]
-    for uid, username in resellers_data.items(): lines.append(f"🆔 <code>{uid}</code> ({username}) → ₹{get_balance(uid)}")
-    bot.reply_to(message, "\n".join(lines)[:4000], parse_mode="HTML")
+    send_resellers_page(message.chat.id, list(resellers_data.items()), 0)
+
+def send_resellers_page(chat_id, res_list, page, message_id=None):
+    per_page = 15
+    total_pages = max(1, (len(res_list) + per_page - 1) // per_page)
+    page_items = res_list[page*per_page : (page+1)*per_page]
+    
+    text = f"🤝 <b>𝗥𝗘𝗦𝗘𝗟𝗟𝗘𝗥𝗦 (Page {page+1}/{total_pages})</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
+    for uid, username in page_items: text += f"🆔 <code>{uid}</code> ({username}) → ₹{get_balance(uid)}\n"
+    
+    markup = gen_page_markup("respage", page, total_pages)
+    if message_id: bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode="HTML")
+    else: bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("respage_"))
+def respage_callback(call):
+    page = int(call.data.split("_")[1])
+    send_resellers_page(call.message.chat.id, list(resellers_data.items()), page, call.message.message_id)
+    bot.answer_callback_query(call.id)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  CONVERSATIONAL ADMIN COMMANDS
@@ -609,7 +670,17 @@ def add_user_cmd(message):
     if len(parts) >= 3: execute_add(message, parts[1], parts[2])
     else:
         msg = bot.reply_to(message, "👤 <b>Enter the User ID to add:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
-        bot.register_next_step_handler(msg, lambda m: bot.register_next_step_handler(bot.reply_to(m, f"📦 <b>Which plan?</b> ({', '.join(KEY_PLANS.keys())})", parse_mode="HTML"), lambda m2: execute_add(m2, m.text.strip(), m2.text.strip()) if not is_cancel(m2) else None) if not is_cancel(m) else None)
+        bot.register_next_step_handler(msg, add_step_id)
+
+def add_step_id(message):
+    if is_cancel(message): return
+    target = message.text.strip()
+    msg = bot.reply_to(message, f"📦 <b>Which plan?</b> ({', '.join(KEY_PLANS.keys())})", parse_mode="HTML")
+    bot.register_next_step_handler(msg, add_step_plan, target)
+
+def add_step_plan(message, target):
+    if is_cancel(message): return
+    execute_add(message, target, message.text.strip())
 
 def execute_add(message, target, plan):
     if plan not in KEY_PLANS: return bot.reply_to(message, "❌ Invalid plan.", parse_mode="HTML")
@@ -634,7 +705,11 @@ def remove_targets_cmd(message):
     if len(parts) >= 2: execute_remove(message, cmd, parts[1])
     else:
         msg = bot.reply_to(message, f"🗑️ <b>Enter the ID to remove:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
-        bot.register_next_step_handler(msg, lambda m: execute_remove(m, cmd, m.text.strip()) if not is_cancel(m) else None)
+        bot.register_next_step_handler(msg, remove_step_id, cmd)
+
+def remove_step_id(message, cmd):
+    if is_cancel(message): return
+    execute_remove(message, cmd, message.text.strip())
 
 def execute_remove(message, cmd, target):
     if cmd == '/remove':
@@ -655,13 +730,22 @@ def addreseller_cmd(message):
     if len(parts) >= 3: execute_addreseller(message, parts[1], parts[2])
     else:
         msg = bot.reply_to(message, "🤝 <b>Enter the new Reseller's Telegram ID:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
-        bot.register_next_step_handler(msg, lambda m: bot.register_next_step_handler(bot.reply_to(m, "💰 <b>Enter Initial Balance:</b>", parse_mode="HTML"), lambda m2: execute_addreseller(m2, m.text.strip(), m2.text.strip()) if not is_cancel(m2) else None) if not is_cancel(m) else None)
+        bot.register_next_step_handler(msg, addres_step_id)
+
+def addres_step_id(message):
+    if is_cancel(message): return
+    target = message.text.strip()
+    msg = bot.reply_to(message, "💰 <b>Enter Initial Balance:</b>", parse_mode="HTML")
+    bot.register_next_step_handler(msg, addres_step_bal, target)
+
+def addres_step_bal(message, target):
+    if is_cancel(message): return
+    execute_addreseller(message, target, message.text.strip())
 
 def execute_addreseller(message, target, bal_str):
     try: initial_bal = int(bal_str)
     except ValueError: return bot.reply_to(message, "❌ Balance must be a number.", parse_mode="HTML")
     
-    # Auto-saves username as "Unknown" until they use the bot
     resellers_data[target] = "Unknown"
     balances[target] = get_balance(target) + initial_bal
     save_resellers(resellers_data); save_balances(balances)
@@ -671,8 +755,8 @@ def execute_addreseller(message, target, bal_str):
     
     try:
         bot.send_message(target, f"💰 <b>𝗬𝗼𝘂 𝗔𝗿𝗲 𝗣𝗿𝗼𝗺𝗼𝘁𝗲𝗱 𝗧𝗼 𝗥𝗲𝘀𝗲𝗹𝗹𝗲𝗿!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n💵 <b>Balance:</b> ₹{balances[target]}\n🔑 <b>Total Keys Generated:</b> 0\n\n📋 <i>Use /prices to see key prices</i>\n🔑 <i>Use /genkey to generate</i>", parse_mode="HTML")
-    except Exception as e:
-        bot.reply_to(message, f"⚠️ Note: Promotion message wasn't sent to the user. They need to start the bot first.", parse_mode="HTML")
+    except Exception:
+        bot.reply_to(message, f"⚠️ Note: Promotion message wasn't sent. They need to start the bot first.", parse_mode="HTML")
 
 @bot.message_handler(commands=['addbalance', 'setbalance'])
 def addbalance_cmd(message):
@@ -682,7 +766,17 @@ def addbalance_cmd(message):
     if len(parts) >= 3: execute_balance_change(message, cmd, parts[1], parts[2])
     else:
         msg = bot.reply_to(message, "👤 <b>Enter the Reseller's Telegram ID:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
-        bot.register_next_step_handler(msg, lambda m: bot.register_next_step_handler(bot.reply_to(m, "💰 <b>Enter the amount:</b>", parse_mode="HTML"), lambda m2: execute_balance_change(m2, cmd, m.text.strip(), m2.text.strip()) if not is_cancel(m2) else None) if not is_cancel(m) else None)
+        bot.register_next_step_handler(msg, bal_step_id, cmd)
+
+def bal_step_id(message, cmd):
+    if is_cancel(message): return
+    target = message.text.strip()
+    msg = bot.reply_to(message, "💰 <b>Enter the amount:</b>", parse_mode="HTML")
+    bot.register_next_step_handler(msg, bal_step_amt, cmd, target)
+
+def bal_step_amt(message, cmd, target):
+    if is_cancel(message): return
+    execute_balance_change(message, cmd, target, message.text.strip())
 
 def execute_balance_change(message, cmd, target, amount_str):
     try: amount = int(amount_str)
@@ -705,7 +799,17 @@ def extendall_cmd(message):
     if len(parts) >= 3: execute_extendall(message, parts[1], parts[2])
     else:
         msg = bot.reply_to(message, "⏳ <b>Enter amount to extend (e.g. 2):</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
-        bot.register_next_step_handler(msg, lambda m: bot.register_next_step_handler(bot.reply_to(m, "📅 <b>Enter unit (hours or days):</b>", parse_mode="HTML"), lambda m2: execute_extendall(m2, m.text.strip(), m2.text.strip()) if not is_cancel(m2) else None) if not is_cancel(m) else None)
+        bot.register_next_step_handler(msg, ext_step_amt)
+
+def ext_step_amt(message):
+    if is_cancel(message): return
+    amount_str = message.text.strip()
+    msg = bot.reply_to(message, "📅 <b>Enter unit (hours or days):</b>", parse_mode="HTML")
+    bot.register_next_step_handler(msg, ext_step_unit, amount_str)
+
+def ext_step_unit(message, amount_str):
+    if is_cancel(message): return
+    execute_extendall(message, amount_str, message.text.strip())
 
 def execute_extendall(message, amount_str, unit):
     try: amount = int(amount_str)
@@ -727,9 +831,7 @@ def broadcast_cmd(message):
     if not is_admin(str(message.chat.id)): return bot.reply_to(message, admin_only_msg(), parse_mode="HTML")
     cmd = message.text.split()[0].lower()
     parts = message.text.split(maxsplit=1)
-    
-    if len(parts) > 1:
-        execute_broadcast(message, cmd, parts[1])
+    if len(parts) > 1: execute_broadcast(message, cmd, parts[1])
     else:
         msg = bot.reply_to(message, "📢 <b>Enter the message to broadcast:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
         bot.register_next_step_handler(msg, broadcast_step, cmd)
@@ -739,12 +841,9 @@ def broadcast_step(message, cmd):
     execute_broadcast(message, cmd, message.text)
 
 def execute_broadcast(message, cmd, text_content):
-    if cmd == '/bcreseller':
-        targets = set(resellers_data.keys())
-    elif cmd == '/bcpaid':
-        targets = set(allowed_user_ids)
-    else:
-        targets = all_known_users | set(allowed_user_ids) | set(resellers_data.keys()) | ADMIN_IDS
+    if cmd == '/bcreseller': targets = set(resellers_data.keys())
+    elif cmd == '/bcpaid': targets = set(allowed_user_ids)
+    else: targets = all_known_users | set(allowed_user_ids) | set(resellers_data.keys()) | ADMIN_IDS
 
     targets = list(targets)
     text = f"📢 <b>𝗕𝗥𝗢𝗔𝗗𝗖𝗔𝗦𝗧</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n{text_content}\n\n━━━━━━━━━━━━━━━━━━━━━━"
@@ -753,13 +852,8 @@ def execute_broadcast(message, cmd, text_content):
     success, fail = 0, 0
     
     for t in targets:
-        try:
-            bot.send_message(t, text, parse_mode="HTML")
-            success += 1
-            time.sleep(0.05) 
-        except Exception as e:
-            print(f"Broadcast failed for {t}: {e}")
-            fail += 1
+        try: bot.send_message(t, text, parse_mode="HTML"); success += 1; time.sleep(0.05) 
+        except: fail += 1
 
     bot.reply_to(message, f"📢 <b>Broadcast Done</b>\n✅ Sent: {success}\n❌ Failed: {fail}", parse_mode="HTML")
 
@@ -770,18 +864,65 @@ def admin_reports(message):
     if cmd == '/paidusers':
         paid = [u for u in allowed_user_ids if u not in trial_users]
         if not paid: return bot.reply_to(message, "⚠️ No paid users found.", parse_mode="HTML")
-        lines = ["💎 <b>𝗣𝗔𝗜𝗗 𝗨𝗦𝗘𝗥𝗦</b>\n━━━━━━━━━━━━━━━━━━━━━━"]
-        for uid in paid: lines.append(f"🆔 <code>{uid}</code> [Exp: {fmt_expiry(user_access.get(uid, {}).get('expiry_time', 0))}]")
-        bot.reply_to(message, "\n".join(lines)[:4000], parse_mode="HTML")
+        send_paidusers_page(message.chat.id, paid, 0)
     elif cmd == '/freeusers':
         free = [u for u in all_known_users if u not in allowed_user_ids]
         if not free: return bot.reply_to(message, "⚠️ No free users found.", parse_mode="HTML")
-        bot.reply_to(message, f"🆓 <b>𝗙𝗥𝗘𝗘 𝗨𝗦𝗘𝗥𝗦 ({len(free)})</b>\n━━━━━━━━━━━━━━━━━━━━━━\n" + "\n".join([f"🆔 <code>{uid}</code>" for uid in free])[:4000], parse_mode="HTML")
+        send_freeusers_page(message.chat.id, free, 0)
     elif cmd == '/resellerstats':
         if not resellers_data: return bot.reply_to(message, "⚠️ No resellers found.", parse_mode="HTML")
-        lines = ["📊 <b>𝗥𝗘𝗦𝗘𝗟𝗟𝗘𝗥 𝗦𝗧𝗔𝗧𝗦</b>\n━━━━━━━━━━━━━━━━━━━━━━"]
-        for uid, username in resellers_data.items(): lines.append(f"👤 {username} (<code>{uid}</code>)\n💵 Bal: ₹{get_balance(uid)} | 🔑 Keys: {count_keys_generated_by(uid)}\n")
-        bot.reply_to(message, "\n".join(lines)[:4000], parse_mode="HTML")
+        send_rstats_page(message.chat.id, list(resellers_data.items()), 0)
+
+# Paginated Reports Helpers
+def send_paidusers_page(chat_id, users_list, page, message_id=None):
+    per_page = 20
+    total_pages = max(1, (len(users_list) + per_page - 1) // per_page)
+    page_items = users_list[page*per_page : (page+1)*per_page]
+    text = f"💎 <b>𝗣𝗔𝗜𝗗 𝗨𝗦𝗘𝗥𝗦 (Page {page+1}/{total_pages})</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
+    for uid in page_items: text += f"🆔 <code>{uid}</code> [Exp: {fmt_expiry(user_access.get(uid, {}).get('expiry_time', 0))}]\n"
+    markup = gen_page_markup("paid", page, total_pages)
+    if message_id: bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode="HTML")
+    else: bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("paid_"))
+def paid_page_callback(call):
+    page = int(call.data.split("_")[1])
+    paid = [u for u in allowed_user_ids if u not in trial_users]
+    send_paidusers_page(call.message.chat.id, paid, page, call.message.message_id)
+    bot.answer_callback_query(call.id)
+
+def send_freeusers_page(chat_id, users_list, page, message_id=None):
+    per_page = 30
+    total_pages = max(1, (len(users_list) + per_page - 1) // per_page)
+    page_items = users_list[page*per_page : (page+1)*per_page]
+    text = f"🆓 <b>𝗙𝗥𝗘𝗘 𝗨𝗦𝗘𝗥𝗦 (Page {page+1}/{total_pages})</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
+    for uid in page_items: text += f"🆔 <code>{uid}</code>\n"
+    markup = gen_page_markup("free", page, total_pages)
+    if message_id: bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode="HTML")
+    else: bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("free_"))
+def free_page_callback(call):
+    page = int(call.data.split("_")[1])
+    free = [u for u in all_known_users if u not in allowed_user_ids]
+    send_freeusers_page(call.message.chat.id, free, page, call.message.message_id)
+    bot.answer_callback_query(call.id)
+
+def send_rstats_page(chat_id, res_list, page, message_id=None):
+    per_page = 15
+    total_pages = max(1, (len(res_list) + per_page - 1) // per_page)
+    page_items = res_list[page*per_page : (page+1)*per_page]
+    text = f"📊 <b>𝗥𝗘𝗦𝗘𝗟𝗟𝗘𝗥 𝗦𝗧𝗔𝗧𝗦 (Page {page+1}/{total_pages})</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
+    for uid, username in page_items: text += f"👤 {username} (<code>{uid}</code>)\n💵 Bal: ₹{get_balance(uid)} | 🔑 Keys: {count_keys_generated_by(uid)}\n\n"
+    markup = gen_page_markup("rstat", page, total_pages)
+    if message_id: bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode="HTML")
+    else: bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rstat_"))
+def rstat_page_callback(call):
+    page = int(call.data.split("_")[1])
+    send_rstats_page(call.message.chat.id, list(resellers_data.items()), page, call.message.message_id)
+    bot.answer_callback_query(call.id)
 
 @bot.message_handler(commands=['getdata'])
 def send_database_files(message):
@@ -823,26 +964,17 @@ def clearalldata_cmd(message):
 def clearalldata_step(message):
     if is_cancel(message): return
     if message.text.strip() == "CONFIRM WIPE":
-        # Clear in-memory sets & dicts
-        all_known_users.clear()
-        trial_users.clear()
-        allowed_user_ids.clear()
-        user_access.clear()
-        active_keys.clear()
-        key_history.clear()
-        resellers_data.clear()
-        trial_keys.clear()
-        balances.clear()
+        all_known_users.clear(); trial_users.clear(); allowed_user_ids.clear()
+        user_access.clear(); active_keys.clear(); key_history.clear()
+        resellers_data.clear(); trial_keys.clear(); balances.clear()
         
-        # Clear physical files
         files_to_wipe = [USER_FILE, LOG_FILE, USER_ACCESS_FILE, KEYS_FILE, KEY_HISTORY_FILE, RESELLERS_FILE, BALANCE_FILE, ALL_USERS_FILE, TRIAL_KEYS_FILE, TRIAL_USERS_FILE]
         for f in files_to_wipe:
             if os.path.exists(f): open(f, 'w').close()
             
         bot.reply_to(message, "✅ <b>DATABASE COMPLETELY WIPED.</b> Everything has been reset to zero.", parse_mode="HTML")
         log_action(str(message.chat.id), "EXECUTED FULL DATABASE WIPE", message)
-    else:
-        bot.reply_to(message, "🚫 <b>Confirmation failed. Wipe cancelled.</b>", parse_mode="HTML")
+    else: bot.reply_to(message, "🚫 <b>Confirmation failed. Wipe cancelled.</b>", parse_mode="HTML")
 
 @bot.message_handler(commands=['logs'])
 def send_logs(message):
@@ -861,5 +993,5 @@ def clear_logs_cmd(message):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 if __name__ == "__main__":
     remove_expired_users()
-    print("   ✅ Bot is running perfectly with Broadcast Fixed & ClearData Secure!")
-    bot.infinity_polling(timeout=30, long_polling_timeout=20)
+    print("   ✅ Bot is running perfectly with Pagination & Threading Enabled!")
+    bot.infinity_polling(skip_pending=True, timeout=30, long_polling_timeout=20)
