@@ -22,7 +22,7 @@ bot = telebot.TeleBot(BOT_TOKEN)
 ADMIN_IDS = {"7212246299"} # Ensure your ID is here
 
 ATTACK_API_URL = "http://YOUR_API_DOMAIN_OR_IP/api/attack?ip={ip}&port={port}&time={time}"
-DASHBOARD_URL = "https://core.telegram.org/bots/webapps" 
+DASHBOARD_URL = "https://zeromiss.netlify.app/" 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  PERSISTENT DATA STORAGE 
