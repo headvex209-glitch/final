@@ -40,7 +40,7 @@ BALANCE_FILE     = os.path.join(DATA_DIR, "balances.txt")
 ALL_USERS_FILE   = os.path.join(DATA_DIR, "all_users.txt")
 TRIAL_KEYS_FILE  = os.path.join(DATA_DIR, "trial_keys.txt")
 TRIAL_USERS_FILE = os.path.join(DATA_DIR, "trial_users.txt")
-
+PROFILES_FILE    = os.path.join(DATA_DIR, "profiles.txt")
 ist = pytz.timezone('Asia/Kolkata')
 
 KEY_PLANS = {
@@ -55,6 +55,26 @@ KEY_PLANS = {
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  DATA HELPERS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def read_profiles() -> dict:
+    profiles = {}
+    try:
+        with open(PROFILES_FILE, "r") as f:
+            for line in f:
+                parts = line.strip().split("|", 1)
+                if len(parts) == 2: profiles[parts[0]] = parts[1]
+    except FileNotFoundError: pass
+    return profiles
+
+def save_profiles(profiles: dict):
+    with open(PROFILES_FILE, "w") as f:
+        for uid, name in profiles.items(): f.write(f"{uid}|{name}\n")
+
+def track_profile(user):
+    uid = str(user.id)
+    name = f"@{user.username}" if user.username else str(user.first_name)
+    if user_profiles.get(uid) != name:
+        user_profiles[uid] = name
+        save_profiles(user_profiles)
 def read_file_lines(filename) -> set:
     try:
         with open(filename, "r") as f: return {l.strip() for l in f if l.strip()}
@@ -177,6 +197,7 @@ def save_balances(balances: dict):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  STATE & CACHE
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+user_profiles = read_profiles()
 all_known_users: set   = read_file_lines(ALL_USERS_FILE)
 trial_users: set       = read_file_lines(TRIAL_USERS_FILE)
 allowed_user_ids: list = read_users()
@@ -386,6 +407,7 @@ def get_broadcast_menu():
 def welcome_start(message):
     user_id = str(message.chat.id)
     update_reseller_username(message)
+    track_profile(message.from_user)
     if user_id not in all_known_users:
         all_known_users.add(user_id)
         save_file_lines(ALL_USERS_FILE, all_known_users)
@@ -1139,7 +1161,8 @@ def admin_reports(message):
             
         text = "⏳ <b>𝗧𝗥𝗜𝗔𝗟 𝗨𝗦𝗘𝗥𝗦</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
         for uid in t_users: 
-            text += f"🆔 <code>{uid}</code>\n"
+            uname = user_profiles.get(uid, "Unknown")
+            text += f"🆔 <code>{uid}</code> ({uname})\n"
         bot.send_message(message.chat.id, text, parse_mode="HTML")
         
 def send_paidusers_page(chat_id, users_list, page, message_id=None):
@@ -1147,7 +1170,9 @@ def send_paidusers_page(chat_id, users_list, page, message_id=None):
     total_pages = max(1, (len(users_list) + per_page - 1) // per_page)
     page_items = users_list[page*per_page : (page+1)*per_page]
     text = f"💎 <b>𝗣𝗔𝗜𝗗 𝗨𝗦𝗘𝗥𝗦 (Page {page+1}/{total_pages})</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
-    for uid in page_items: text += f"🆔 <code>{uid}</code> [Exp: {fmt_expiry(user_access.get(uid, {}).get('expiry_time', 0))}]\n"
+    for uid in page_items: 
+        uname = user_profiles.get(uid, "Unknown")
+        text += f"🆔 <code>{uid}</code> ({uname}) [Exp: {fmt_expiry(user_access.get(uid, {}).get('expiry_time', 0))}]\n"
     markup = gen_page_markup("paid", page, total_pages)
     if message_id: bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode="HTML")
     else: bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
@@ -1164,7 +1189,9 @@ def send_freeusers_page(chat_id, users_list, page, message_id=None):
     total_pages = max(1, (len(users_list) + per_page - 1) // per_page)
     page_items = users_list[page*per_page : (page+1)*per_page]
     text = f"🆓 <b>𝗙𝗥𝗘𝗘 𝗨𝗦𝗘𝗥𝗦 (Page {page+1}/{total_pages})</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
-    for uid in page_items: text += f"🆔 <code>{uid}</code>\n"
+    for uid in page_items: 
+        uname = user_profiles.get(uid, "Unknown")
+        text += f"🆔 <code>{uid}</code> ({uname})\n"
     markup = gen_page_markup("free", page, total_pages)
     if message_id: bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode="HTML")
     else: bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
@@ -1315,7 +1342,7 @@ def execute_killtrial(chat_id):
 @bot.callback_query_handler(func=lambda call: True)
 def handle_all_buttons(call):
     user_id = str(call.message.chat.id)
-    
+    track_profile(call.from_user)
     # 🔥 INSTANT UI FIX: Stops the mobile loading spinner immediately! 🔥
     try: bot.answer_callback_query(call.id)
     except: pass
@@ -1468,7 +1495,6 @@ def handle_all_buttons(call):
         if not is_admin(user_id): return
         call.message.text = "/" + action.replace("cb_", "") 
         admin_reports(call.message)
-    bot.answer_callback_query(call.id)
 
 @bot.message_handler(content_types=['web_app_data'])
 def handle_webapp_data(message):
