@@ -279,6 +279,71 @@ def remove_expired_users():
 #  UI & DASHBOARD MENU
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @bot.message_handler(commands=['start'])
+# --- ANIMATED CLEANUP FUNCTION ---
+def animated_delete(chat_id, message_id, delay=5):
+    """Waits a few seconds, shows a cleaning animation, then deletes the message."""
+    def task():
+        time.sleep(delay)
+        try:
+            bot.edit_message_text("⏳ <i>Cleaning up...</i>", chat_id, message_id, parse_mode="HTML")
+            time.sleep(0.5)
+            bot.delete_message(chat_id, message_id)
+        except Exception:
+            pass
+    threading.Thread(target=task).start()
+
+# --- DYNAMIC MENUS ---
+def get_main_menu(user_id, is_paid):
+    markup = InlineKeyboardMarkup(row_width=2)
+    if is_paid:
+        markup.add(InlineKeyboardButton("🖥️ Launch Web Dashboard", web_app=WebAppInfo(url=DASHBOARD_URL)))
+    
+    markup.add(
+        InlineKeyboardButton("🚀 Quick Attack", callback_data="ui_attack"),
+        InlineKeyboardButton("📊 Live Status", callback_data="ui_status"),
+        InlineKeyboardButton("💳 My Profile", callback_data="ui_profile"),
+        InlineKeyboardButton("🔑 Redeem Key", callback_data="ui_redeem"),
+        InlineKeyboardButton("📜 Rules", callback_data="ui_rules"),
+        InlineKeyboardButton("📅 My Plan", callback_data="ui_plan")
+    )
+    
+    if is_reseller(user_id) or is_admin(user_id):
+        markup.add(InlineKeyboardButton("🤝 Open Reseller Panel", callback_data="menu_reseller"))
+    if is_admin(user_id):
+        markup.add(InlineKeyboardButton("🛠 Open Master Admin Panel", callback_data="menu_admin"))
+    return markup
+
+def get_reseller_menu():
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("🛠 Generate Keys", callback_data="cb_genkey"),
+        InlineKeyboardButton("📦 Unused Keys", callback_data="cb_listkeys"),
+        InlineKeyboardButton("💰 My Balance", callback_data="cb_balance"),
+        InlineKeyboardButton("🛒 Price List", callback_data="cb_prices"),
+        InlineKeyboardButton("🗑 Delete a Key", callback_data="cb_delkey")
+    )
+    markup.add(InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main"))
+    return markup
+
+def get_admin_menu():
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("➕ Add User", callback_data="cb_adduser"),
+        InlineKeyboardButton("➖ Remove User", callback_data="cb_rmuser"),
+        InlineKeyboardButton("💎 Paid Users", callback_data="cb_paidusers"),
+        InlineKeyboardButton("🆓 Free Users", callback_data="cb_freeusers"),
+        InlineKeyboardButton("🤝 Add Reseller", callback_data="cb_addres"),
+        InlineKeyboardButton("🛑 Remove Reseller", callback_data="cb_rmres"),
+        InlineKeyboardButton("💰 Add Funds", callback_data="cb_addbal"),
+        InlineKeyboardButton("📊 Reseller Stats", callback_data="cb_rstats"),
+        InlineKeyboardButton("📢 Broadcast", callback_data="cb_broadcast"),
+        InlineKeyboardButton("📦 Download DB", callback_data="cb_getdata")
+    )
+    markup.add(InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main"))
+    return markup
+
+# --- MAIN START COMMAND ---
+@bot.message_handler(commands=['start'])
 def welcome_start(message):
     user_id = str(message.chat.id)
     update_reseller_username(message)
@@ -287,44 +352,118 @@ def welcome_start(message):
         save_file_lines(ALL_USERS_FILE, all_known_users)
 
     name = message.from_user.first_name
-    markup = InlineKeyboardMarkup(row_width=2)
-    is_paid = user_id in allowed_user_ids and user_id in user_access and user_access[user_id]["expiry_time"] > time.time()
+    is_paid = user_id in allowed_user_ids and user_access.get(user_id, {}).get("expiry_time", 0) > time.time()
     
-    if is_paid:
-        markup.add(InlineKeyboardButton("🖥️ Launch Dashboard", web_app=WebAppInfo(url=DASHBOARD_URL)))
-    
-    markup.add(
-        InlineKeyboardButton("🚀 Quick Attack", callback_data="ui_attack"),
-        InlineKeyboardButton("📊 Live Status", callback_data="ui_status"),
-        InlineKeyboardButton("💳 My Profile", callback_data="ui_profile"),
-        InlineKeyboardButton("🔑 Redeem Key", callback_data="ui_redeem")
-    )
+    # Delete the user's /start message to keep chat clean
+    try: bot.delete_message(user_id, message.message_id)
+    except: pass
 
-    if is_paid: res = f"🚀 <b>𝗪𝗲𝗹𝗰𝗼𝗺𝗲 𝗯𝗮𝗰𝗸, {name}!</b> 🚀\n\n👑 <b>𝗣𝗿𝗲𝗺𝗶𝘂𝗺 𝗔𝗰𝗰𝗲𝘀𝘀 𝗔𝗰𝘁𝗶𝘃𝗲</b>\n\n<i>Use the buttons below or launch the Web Dashboard!</i>"
-    else: res = f"🚀 <b>𝗪𝗲𝗹𝗰𝗼𝗺𝗲 𝘁𝗼 𝗣𝗿𝗲𝗺𝗶𝘂𝗺 𝗕𝗼𝘁, {name}!</b> 🚀\n\n⛔ <b>𝗡𝗼 𝗔𝗰𝘁𝗶𝘃𝗲 𝗣𝗹𝗮𝗻</b>\n\n<i>Please click 'Redeem Key' below to activate your access!</i>"
+    if is_paid: 
+        res = f"🚀 <b>𝗪𝗲𝗹𝗰𝗼𝗺𝗲 𝗯𝗮𝗰𝗸, {name}!</b> 🚀\n\n👑 <b>𝗣𝗿𝗲𝗺𝗶𝘂𝗺 𝗔𝗰𝗰𝗲𝘀𝘀 𝗔𝗰𝘁𝗶𝘃𝗲</b>\n\n<i>Use the buttons below to manage your account.</i>"
+    else: 
+        res = f"🚀 <b>𝗪𝗲𝗹𝗰𝗼𝗺𝗲 𝘁𝗼 𝗣𝗿𝗲𝗺𝗶𝘂𝗺 𝗕𝗼𝘁, {name}!</b> 🚀\n\n⛔ <b>𝗡𝗼 𝗔𝗰𝘁𝗶𝘃𝗲 𝗣𝗹𝗮𝗻</b>\n\n<i>Please click 'Redeem Key' below to activate your access!</i>"
 
-    bot.reply_to(message, res, reply_markup=markup, parse_mode="HTML")
+    bot.send_message(user_id, res, reply_markup=get_main_menu(user_id, is_paid), parse_mode="HTML")
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("ui_"))
-def handle_inline_buttons(call):
+# --- MASTER BUTTON ROUTER ---
+@bot.callback_query_handler(func=lambda call: True)
+def handle_all_buttons(call):
     user_id = str(call.message.chat.id)
+    action = call.data
     username_str = f"@{call.from_user.username}" if call.from_user.username else "—"
+    is_paid = user_id in allowed_user_ids and user_access.get(user_id, {}).get("expiry_time", 0) > time.time()
 
-    if call.data == "ui_profile":
-        bot.send_message(user_id, build_profile_text(user_id, username_str), parse_mode="HTML")
-    elif call.data == "ui_status":
+    # --- MENU NAVIGATION (Instant in-place editing) ---
+    if action == "menu_main":
+        bot.edit_message_text(f"🚀 <b>Main Dashboard</b>", chat_id=user_id, message_id=call.message.message_id, reply_markup=get_main_menu(user_id, is_paid), parse_mode="HTML")
+    elif action == "menu_reseller":
+        bot.edit_message_text("🤝 <b>Reseller Control Panel</b>", chat_id=user_id, message_id=call.message.message_id, reply_markup=get_reseller_menu(), parse_mode="HTML")
+    elif action == "menu_admin":
+        bot.edit_message_text("🛠 <b>Master Admin Panel</b>", chat_id=user_id, message_id=call.message.message_id, reply_markup=get_admin_menu(), parse_mode="HTML")
+
+    # --- MAIN MENU ACTIONS (With Animated Cleanup) ---
+    elif action == "ui_profile":
+        msg = bot.send_message(user_id, build_profile_text(user_id, username_str), parse_mode="HTML")
+        animated_delete(user_id, msg.message_id, delay=10) # Disappears after 10 seconds
+    elif action == "ui_plan":
+        if not is_paid: 
+            msg = bot.send_message(user_id, no_access_msg(), parse_mode="HTML")
+        else: 
+            msg = bot.send_message(user_id, f"📅 <b>𝗬𝗢𝗨𝗥 𝗣𝗟𝗔𝗡</b>\n⏳ <b>Expires:</b> {fmt_expiry(user_access[user_id]['expiry_time'])}", parse_mode="HTML")
+        animated_delete(user_id, msg.message_id, delay=8)
+    elif action == "ui_rules":
+        msg = bot.send_message(user_id, "📜 <b>𝗥𝗨𝗟𝗘𝗦</b>\n1️⃣ No sharing keys.\n2️⃣ One key = one account.\n3️⃣ No refunds.", parse_mode="HTML")
+        animated_delete(user_id, msg.message_id, delay=10)
+    elif action == "ui_status":
         attack_status(call.message) 
-    elif call.data == "ui_redeem":
+    elif action == "ui_redeem":
         msg = bot.send_message(user_id, "🔑 <b>Enter the key you want to redeem:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
         bot.register_next_step_handler(msg, redeem_step)
-    elif call.data == "ui_attack":
-        if user_id not in allowed_user_ids or user_access.get(user_id, {}).get("expiry_time", 0) < time.time():
-            bot.send_message(user_id, no_access_msg(), parse_mode="HTML")
+    elif action == "ui_attack":
+        if not is_paid:
+            msg = bot.send_message(user_id, no_access_msg(), parse_mode="HTML")
+            animated_delete(user_id, msg.message_id, delay=5)
         else:
             msg = bot.send_message(user_id, "🎯 <b>Enter Target IP:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
             bot.register_next_step_handler(msg, attack_step_ip)
-    bot.answer_callback_query(call.id)
 
+    # --- RESELLER ACTIONS ---
+    elif action == "cb_genkey":
+        if not is_admin_or_reseller(user_id): return
+        msg = bot.send_message(user_id, f"📦 <b>Which plan?</b>\nAvailable: {', '.join(KEY_PLANS.keys())}\n<i>(Type /cancel)</i>", parse_mode="HTML")
+        bot.register_next_step_handler(msg, genkey_plan_step)
+    elif action == "cb_listkeys":
+        if not is_admin_or_reseller(user_id): return
+        listkeys_cmd(call.message) 
+    elif action == "cb_balance":
+        if not is_admin_or_reseller(user_id): return
+        msg = bot.send_message(user_id, f"💰 <b>Your Balance:</b> ₹{get_balance(user_id)}", parse_mode="HTML")
+        animated_delete(user_id, msg.message_id, delay=8)
+    elif action == "cb_prices":
+        lines = ["💰 <b>𝗞𝗘𝗬 𝗣𝗥𝗜𝗖𝗘 𝗟𝗜𝗦𝗧</b>\n━━━━━━━━━━━━━━━━━━━━━━"]
+        for plan, info in KEY_PLANS.items(): lines.append(f"📦 <b>{plan.ljust(8)}</b> - ₹{info['cost']}")
+        msg = bot.send_message(user_id, "\n".join(lines), parse_mode="HTML")
+        animated_delete(user_id, msg.message_id, delay=15)
+    elif action == "cb_delkey":
+        if not is_admin_or_reseller(user_id): return
+        msg = bot.send_message(user_id, "🗑️ <b>Enter the key to delete:</b>", parse_mode="HTML")
+        bot.register_next_step_handler(msg, deletekey_step)
+
+    # --- ADMIN ACTIONS ---
+    elif action == "cb_adduser":
+        if not is_admin(user_id): return
+        msg = bot.send_message(user_id, "👤 <b>Enter the User ID to add:</b>", parse_mode="HTML")
+        bot.register_next_step_handler(msg, add_step_id)
+    elif action == "cb_rmuser":
+        if not is_admin(user_id): return
+        msg = bot.send_message(user_id, "🗑️ <b>Enter the User ID to remove:</b>", parse_mode="HTML")
+        bot.register_next_step_handler(msg, remove_step_id, '/remove')
+    elif action == "cb_addres":
+        if not is_admin(user_id): return
+        msg = bot.send_message(user_id, "🤝 <b>Enter new Reseller ID:</b>", parse_mode="HTML")
+        bot.register_next_step_handler(msg, addres_step_id)
+    elif action == "cb_rmres":
+        if not is_admin(user_id): return
+        msg = bot.send_message(user_id, "🛑 <b>Enter Reseller ID to remove:</b>", parse_mode="HTML")
+        bot.register_next_step_handler(msg, remove_step_id, '/rmreseller')
+    elif action == "cb_addbal":
+        if not is_admin(user_id): return
+        msg = bot.send_message(user_id, "💰 <b>Enter Reseller ID to fund:</b>", parse_mode="HTML")
+        bot.register_next_step_handler(msg, bal_step_id, '/addbalance')
+    elif action == "cb_broadcast":
+        if not is_admin(user_id): return
+        msg = bot.send_message(user_id, "📢 <b>Enter broadcast message:</b>", parse_mode="HTML")
+        bot.register_next_step_handler(msg, broadcast_step, '/broadcast')
+    elif action == "cb_getdata":
+        if not is_admin(user_id): return
+        send_database_files(call.message)
+    elif action in ["cb_paidusers", "cb_freeusers", "cb_rstats"]:
+        if not is_admin(user_id): return
+        call.message.text = "/" + action.replace("cb_", "") 
+        admin_reports(call.message)
+
+    bot.answer_callback_query(call.id)
+    
 @bot.message_handler(content_types=['web_app_data'])
 def handle_webapp_data(message):
     user_id = str(message.chat.id)
