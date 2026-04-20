@@ -19,6 +19,16 @@ import pytz
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 bot = telebot.TeleBot(BOT_TOKEN, threaded=True, num_threads=32)
 
+# 🔥 ULTRA-FAST UI PATCH 🔥
+# Forces all deletions into the background so the bot never pauses
+original_delete = bot.delete_message
+def async_delete(*args, **kwargs):
+    def task():
+        try: original_delete(*args, **kwargs)
+        except Exception: pass
+    threading.Thread(target=task).start()
+bot.delete_message = async_delete
+
 ADMIN_IDS = {"7212246299"} # Ensure your ID is here
 
 ATTACK_API_URL = "http://YOUR_API_DOMAIN_OR_IP/api/attack?ip={ip}&port={port}&time={time}"
