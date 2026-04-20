@@ -225,13 +225,13 @@ def build_profile_text(user_id, username_str):
     return f"👤 <b>𝗔𝗖𝗖𝗢𝗨𝗡𝗧 𝗜𝗡𝗙𝗢</b>\n━━━━━━━━━━━━━━━━━━━━━━\n🆔 <b>ID:</b> <code>{user_id}</code>\n📛 <b>Username:</b> {username_str}\n🎭 <b>Role:</b> {role}\n{expiry}{bal}\n━━━━━━━━━━━━━━━━━━━━━━"
 
 def is_cancel(message):
-    if not message.text:
+    try: bot.delete_message(message.chat.id, message.message_id)
+    except: pass
+
+    if not message.text or message.text.startswith('/'):
         bot.clear_step_handler_by_chat_id(message.chat.id)
-        bot.reply_to(message, "🚫 <b>Invalid input. Operation cancelled.</b>", parse_mode="HTML")
-        return True
-    if message.text.startswith('/'):
-        bot.clear_step_handler_by_chat_id(message.chat.id)
-        bot.reply_to(message, "🚫 <b>Operation cancelled.</b>", parse_mode="HTML")
+        msg = bot.send_message(message.chat.id, "🚫 <b>Operation cancelled.</b>", parse_mode="HTML")
+        animated_delete(message.chat.id, msg.message_id, delay=3)
         return True
     return False
 
@@ -342,6 +342,17 @@ def get_admin_menu():
     markup.add(InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main"))
     return markup
 
+def get_broadcast_menu():
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("🌍 Everyone", callback_data="bc_all"),
+        InlineKeyboardButton("💎 Paid Users", callback_data="bc_paid"),
+        InlineKeyboardButton("🆓 Free Users", callback_data="bc_free"),
+        InlineKeyboardButton("🤝 Resellers", callback_data="bc_reseller")
+    )
+    markup.add(InlineKeyboardButton("🔙 Back to Admin Panel", callback_data="menu_admin"))
+    return markup
+
 # --- MAIN START COMMAND ---
 @bot.message_handler(commands=['start'])
 def welcome_start(message):
@@ -369,6 +380,10 @@ def welcome_start(message):
 @bot.callback_query_handler(func=lambda call: True)
 def handle_all_buttons(call):
     user_id = str(call.message.chat.id)
+    
+    # 🔥 THIS AUTO-CANCELS OLD TASKS IF THEY CLICK A NEW BUTTON 🔥
+    bot.clear_step_handler_by_chat_id(call.message.chat.id)
+    
     action = call.data
     username_str = f"@{call.from_user.username}" if call.from_user.username else "—"
     is_paid = user_id in allowed_user_ids and user_access.get(user_id, {}).get("expiry_time", 0) > time.time()
@@ -384,7 +399,7 @@ def handle_all_buttons(call):
     # --- MAIN MENU ACTIONS (With Animated Cleanup) ---
     elif action == "ui_profile":
         msg = bot.send_message(user_id, build_profile_text(user_id, username_str), parse_mode="HTML")
-        animated_delete(user_id, msg.message_id, delay=10) # Disappears after 10 seconds
+        animated_delete(user_id, msg.message_id, delay=10)
     elif action == "ui_plan":
         if not is_paid: 
             msg = bot.send_message(user_id, no_access_msg(), parse_mode="HTML")
@@ -450,10 +465,17 @@ def handle_all_buttons(call):
         if not is_admin(user_id): return
         msg = bot.send_message(user_id, "💰 <b>Enter Reseller ID to fund:</b>", parse_mode="HTML")
         bot.register_next_step_handler(msg, bal_step_id, '/addbalance')
+        
+    # 🔥 NEW BROADCAST MENU TRIGGER 🔥
     elif action == "cb_broadcast":
         if not is_admin(user_id): return
-        msg = bot.send_message(user_id, "📢 <b>Enter broadcast message:</b>", parse_mode="HTML")
-        bot.register_next_step_handler(msg, broadcast_step, '/broadcast')
+        bot.edit_message_text("📢 <b>Select Broadcast Target:</b>", chat_id=user_id, message_id=call.message.message_id, reply_markup=get_broadcast_menu(), parse_mode="HTML")
+    elif action.startswith("bc_"):
+        if not is_admin(user_id): return
+        target_type = action.replace("bc_", "") 
+        msg = bot.send_message(user_id, f"📢 <b>Enter message for {target_type.upper()}:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
+        bot.register_next_step_handler(msg, broadcast_step, target_type)
+        
     elif action == "cb_getdata":
         if not is_admin(user_id): return
         send_database_files(call.message)
@@ -967,50 +989,41 @@ def execute_extendall(message, amount_str, unit):
 
 @bot.message_handler(commands=['broadcast', 'bcpaid', 'bcreseller'])
 def broadcast_cmd(message):
-    if not is_admin(str(message.chat.id)): return bot.reply_to(message, admin_only_msg(), parse_mode="HTML")
-    cmd = message.text.split()[0].lower()
-    parts = message.text.split(maxsplit=1)
-    if len(parts) > 1: execute_broadcast(message, cmd, parts[1])
-    else:
-        msg = bot.reply_to(message, "📢 <b>Enter the message to broadcast:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
-        bot.register_next_step_handler(msg, broadcast_step, cmd)
+    if not is_admin(str(message.chat.id)): return
+    bot.reply_to(message, "📢 <b>Please use the Admin Panel buttons to broadcast.</b>\nClick /start to open the menu.", parse_mode="HTML")
 
-def broadcast_step(message, cmd):
+def broadcast_step(message, target_type):
+    try: bot.delete_message(message.chat.id, message.message_id) 
+    except: pass
+
     if is_cancel(message): return
-    execute_broadcast(message, cmd, message.text)
+    execute_broadcast(message, target_type, message.text)
 
-def execute_broadcast(message, cmd, text_content):
-    if cmd == '/bcreseller': targets = set(resellers_data.keys())
-    elif cmd == '/bcpaid': targets = set(allowed_user_ids)
+def execute_broadcast(message, target_type, text_content):
+    if target_type == 'reseller': targets = set(resellers_data.keys())
+    elif target_type == 'paid': targets = set(allowed_user_ids)
+    elif target_type == 'free': targets = all_known_users - set(allowed_user_ids)
     else: targets = all_known_users | set(allowed_user_ids) | set(resellers_data.keys()) | ADMIN_IDS
 
     targets = list(targets)
     text = f"📢 <b>𝗕𝗥𝗢𝗔𝗗𝗖𝗔𝗦𝗧</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n{text_content}\n\n━━━━━━━━━━━━━━━━━━━━━━"
     
-    bot.reply_to(message, f"⏳ <i>Broadcasting to {len(targets)} users in progress...</i>", parse_mode="HTML")
-    success, fail = 0, 0
+    loading_msg = bot.send_message(message.chat.id, f"⏳ <i>Broadcasting to {len(targets)} users in progress...</i>", parse_mode="HTML")
     
+    success, fail = 0, 0
     for t in targets:
-        try: bot.send_message(t, text, parse_mode="HTML"); success += 1; time.sleep(0.05) 
-        except: fail += 1
+        try: 
+            bot.send_message(t, text, parse_mode="HTML")
+            success += 1
+            time.sleep(0.05) 
+        except: 
+            fail += 1
 
-    bot.reply_to(message, f"📢 <b>Broadcast Done</b>\n✅ Sent: {success}\n❌ Failed: {fail}", parse_mode="HTML")
+    try: bot.delete_message(message.chat.id, loading_msg.message_id)
+    except: pass
 
-@bot.message_handler(commands=['paidusers', 'freeusers', 'resellerstats'])
-def admin_reports(message):
-    if not is_admin(str(message.chat.id)): return bot.reply_to(message, admin_only_msg(), parse_mode="HTML")
-    cmd = message.text.split()[0].lower()
-    if cmd == '/paidusers':
-        paid = [u for u in allowed_user_ids if u not in trial_users]
-        if not paid: return bot.reply_to(message, "⚠️ No paid users found.", parse_mode="HTML")
-        send_paidusers_page(message.chat.id, paid, 0)
-    elif cmd == '/freeusers':
-        free = [u for u in all_known_users if u not in allowed_user_ids]
-        if not free: return bot.reply_to(message, "⚠️ No free users found.", parse_mode="HTML")
-        send_freeusers_page(message.chat.id, free, 0)
-    elif cmd == '/resellerstats':
-        if not resellers_data: return bot.reply_to(message, "⚠️ No resellers found.", parse_mode="HTML")
-        send_rstats_page(message.chat.id, list(resellers_data.items()), 0)
+    final_msg = bot.send_message(message.chat.id, f"📢 <b>Broadcast Done</b>\n✅ Sent: {success}\n❌ Failed: {fail}", parse_mode="HTML")
+    animated_delete(message.chat.id, final_msg.message_id, delay=10)
 
 # Paginated Reports Helpers
 def send_paidusers_page(chat_id, users_list, page, message_id=None):
