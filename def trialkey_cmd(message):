@@ -401,7 +401,7 @@ def welcome_start(message):
     # 🔥 FIX: THEN delete the user's /start message to keep it clean
     try: bot.delete_message(user_id, message.message_id)
     except: pass
-    
+    bot.answer_callback_query(call.id)
 @bot.message_handler(content_types=['web_app_data'])
 def handle_webapp_data(message):
     user_id = str(message.chat.id)
@@ -786,7 +786,7 @@ def admin_commands(message):
         "📢 <b>BROADCAST & DATA</b>\n🔊 /broadcast | /bcpaid | /bcreseller\n📄 /logs | 🗑 /clearlogs\n📦 /getdata (Download Full Ledger)\n⚠️ /clearalldata (Wipe Database)\n━━━━━━━━━━━━━━━━━━━━━━",
         parse_mode="HTML"
     )
-    @bot.message_handler(commands=['trialkey'])
+@bot.message_handler(commands=['trialkey'])
 def trialkey_cmd(message):
     if not is_admin(str(message.chat.id)): return
     parts = message.text.split()
@@ -1416,7 +1416,7 @@ def handle_all_buttons(call):
         if not is_admin(user_id): return
         call.message.text = "/" + action.replace("cb_", "") 
         admin_reports(call.message)
-    
+    bot.answer_callback_query(call.id)
 @bot.message_handler(content_types=['web_app_data'])
 def handle_webapp_data(message):
     user_id = str(message.chat.id)
