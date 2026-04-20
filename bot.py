@@ -350,6 +350,9 @@ def get_admin_menu():
         InlineKeyboardButton("🤝 Add Reseller", callback_data="cb_addres"),
         InlineKeyboardButton("🛑 Remove Reseller", callback_data="cb_rmres"),
         InlineKeyboardButton("💰 Add Funds", callback_data="cb_addbal"),
+        InlineKeyboardButton("⚙️ Set Balance", callback_data="cb_setbal"),
+        InlineKeyboardButton("🎁 Gen Trial Key", callback_data="cb_trialkey"),
+        InlineKeyboardButton("💀 Kill All Trials", callback_data="cb_killtrial"),
         InlineKeyboardButton("📢 Broadcast", callback_data="cb_broadcast"),
         InlineKeyboardButton("📦 Download DB", callback_data="cb_getdata")
     )
@@ -1268,7 +1271,46 @@ def clear_logs_cmd(message):
     if os.path.exists(LOG_FILE): open(LOG_FILE, "w").close()
     msg = bot.send_message(message.chat.id, "✅ <b>Logs wiped.</b>", parse_mode="HTML")
     animated_delete(message.chat.id, msg.message_id, delay=5)
+def trialkey_step(message):
+    user_id = str(message.chat.id)
+    if is_cancel(message): return
+    if user_id in active_prompts:
+        try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
+        except: pass
+        del active_prompts[user_id]
+        
+    parts = message.text.split()
+    if len(parts) == 2:
+        try:
+            days = float(parts[0])
+            max_uses = int(parts[1])
+            key = generate_key("TRIAL-")
+            trial_keys[key] = {"duration": days * 86400, "max_uses": max_uses, "used_by": []}
+            save_trial_keys(trial_keys)
+            msg = bot.send_message(user_id, f"✅ <b>Trial Key Generated!</b>\n🔑 <code>{key}</code>\n⏳ Duration: {days} days\n👥 Max Uses: {max_uses}", parse_mode="HTML")
+            animated_delete(user_id, msg.message_id, delay=30)
+        except:
+            msg = bot.send_message(user_id, "❌ Error in numbers. Try again.", parse_mode="HTML")
+            animated_delete(user_id, msg.message_id, delay=5)
+    else:
+        msg = bot.send_message(user_id, "❌ Invalid format. Use: days max_uses", parse_mode="HTML")
+        animated_delete(user_id, msg.message_id, delay=5)
 
+def execute_killtrial(chat_id):
+    trial_keys.clear()
+    save_trial_keys(trial_keys)
+    expired = []
+    for uid in list(trial_users):
+        if uid in user_access: user_access.pop(uid, None)
+        if uid in allowed_user_ids: allowed_user_ids.remove(uid)
+        expired.append(uid)
+    trial_users.clear()
+    save_file_lines(TRIAL_USERS_FILE, trial_users)
+    save_users(allowed_user_ids)
+    save_user_access(user_access)
+    msg = bot.send_message(chat_id, f"🛑 <b>All Trial Keys Killed!</b>\nRemoved access for {len(expired)} trial users.", parse_mode="HTML")
+    animated_delete(chat_id, msg.message_id, delay=10)
+    
 # --- MASTER BUTTON ROUTER ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_all_buttons(call):
@@ -1374,11 +1416,21 @@ def handle_all_buttons(call):
         msg = bot.send_message(user_id, "🛑 <b>Enter Reseller ID to remove:</b>", parse_mode="HTML")
         active_prompts[user_id] = msg.message_id
         bot.register_next_step_handler(msg, remove_step_id, '/rmreseller')
-    elif action == "cb_addbal":
+    elif action == "cb_setbal":
         if not is_admin(user_id): return
-        msg = bot.send_message(user_id, "💰 <b>Enter Reseller ID to fund:</b>", parse_mode="HTML")
+        msg = bot.send_message(user_id, "⚙️ <b>Enter Reseller ID to SET balance:</b>", parse_mode="HTML")
         active_prompts[user_id] = msg.message_id
-        bot.register_next_step_handler(msg, bal_step_id, '/addbalance')
+        bot.register_next_step_handler(msg, bal_step_id, '/setbalance')
+        
+    elif action == "cb_trialkey":
+        if not is_admin(user_id): return
+        msg = bot.send_message(user_id, "🎁 <b>Generate Trial Key</b>\n\nEnter exactly like this: <code>days uses</code>\n<i>Example: 0.5 10 (12 hrs, 10 uses)</i>", parse_mode="HTML")
+        active_prompts[user_id] = msg.message_id
+        bot.register_next_step_handler(msg, trialkey_step)
+        
+    elif action == "cb_killtrial":
+        if not is_admin(user_id): return
+        execute_killtrial(user_id)
         
     # --- BROADCAST SYSTEM ---
     elif action == "cb_broadcast":
