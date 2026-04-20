@@ -1304,7 +1304,7 @@ def handle_all_buttons(call):
         pass # 🔥 This stops the "message is not modified" crash!
         
     # --- MAIN MENU ACTIONS ---
-    elif action == "ui_profile":
+    if action == "ui_profile":
         msg = bot.send_message(user_id, build_profile_text(user_id, username_str), parse_mode="HTML")
         animated_delete(user_id, msg.message_id, delay=10)
     elif action == "ui_plan":
