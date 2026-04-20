@@ -312,12 +312,10 @@ def remove_expired_users():
 
 # --- ANIMATED CLEANUP FUNCTION ---
 def animated_delete(chat_id, message_id, delay=5):
-    """Waits a few seconds, shows a cleaning animation, then deletes the message."""
+    """Waits a few seconds, then quietly deletes the message without UI lag."""
     def task():
         time.sleep(delay)
         try:
-            bot.edit_message_text("⏳ <i>Cleaning up...</i>", chat_id, message_id, parse_mode="HTML")
-            time.sleep(0.5)
             bot.delete_message(chat_id, message_id)
         except Exception:
             pass
@@ -700,8 +698,8 @@ def execute_genkey(message, plan, amount_str):
     save_keys(active_keys); save_key_history(key_history)
     log_action(user_id, f"Generated {amount} key(s) | plan={plan} | cost=₹{total_cost}", message)
     
-    msg = bot.send_message(user_id, f"🔑 <b>𝗞𝗘𝗬(𝗦) 𝗚𝗘𝗡𝗘𝗥𝗔𝗧𝗘𝗗!</b>\n\n" + "\n".join([f"<code>{k}</code>" for k in gen_keys]) + f"\n\n📦 <b>Plan:</b> {plan}\n💰 <b>Cost:</b> ₹{total_cost}", parse_mode="HTML")
-    animated_delete(user_id, msg.message_id, delay=30) 
+    bot.send_message(user_id, f"🔑 <b>𝗞𝗘𝗬(𝗦) 𝗚𝗘𝗡𝗘𝗥𝗔𝗧𝗘𝗗!</b>\n\n" + "\n".join([f"<code>{k}</code>" for k in gen_keys]) + f"\n\n📦 <b>Plan:</b> {plan}\n💰 <b>Cost:</b> ₹{total_cost}", parse_mode="HTML")
+    # 🔥 The key will now stay in the chat permanently! 
 
 @bot.message_handler(commands=['deletekey'])
 def delete_key_cmd(message):
@@ -1314,8 +1312,8 @@ def trialkey_step(message):
             key = generate_key("TRIAL-")
             trial_keys[key] = {"duration": days * 86400, "max_uses": max_uses, "used_by": []}
             save_trial_keys(trial_keys)
-            msg = bot.send_message(user_id, f"✅ <b>Trial Key Generated!</b>\n🔑 <code>{key}</code>\n⏳ Duration: {days} days\n👥 Max Uses: {max_uses}", parse_mode="HTML")
-            animated_delete(user_id, msg.message_id, delay=30)
+            bot.send_message(user_id, f"✅ <b>Trial Key Generated!</b>\n🔑 <code>{key}</code>\n⏳ Duration: {days} days\n👥 Max Uses: {max_uses}", parse_mode="HTML")
+            # 🔥 The trial key will now stay in the chat permanently!
         except:
             msg = bot.send_message(user_id, "❌ Error in numbers. Try again.", parse_mode="HTML")
             animated_delete(user_id, msg.message_id, delay=5)
