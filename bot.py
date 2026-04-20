@@ -245,8 +245,10 @@ def is_cancel(message):
 
 @bot.message_handler(commands=['cancel'])
 def cancel_cmd(message):
+    user_id = str(message.chat.id)
     bot.clear_step_handler_by_chat_id(message.chat.id)
-    bot.send_message(user_id, "✅ Active operations cancelled.", parse_mode="HTML")
+    msg = bot.send_message(user_id, "✅ Active operations cancelled.", parse_mode="HTML")
+    animated_delete(user_id, msg.message_id, delay=3)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  PAGINATION ENGINE (SCALABILITY)
@@ -547,10 +549,6 @@ def attack_step_time(message, ip, port):
         
     execute_attack(message, ip, port, message.text.strip())
 
-def attack_step_time(message, ip, port):
-    if is_cancel(message): return
-    execute_attack(message, ip, port, message.text.strip())
-
 def execute_attack(message, target, port_str, time_str):
     user_id = str(message.chat.id)
     if user_id not in allowed_user_ids or user_access.get(user_id, {}).get("expiry_time", 0) < time.time():
@@ -585,6 +583,7 @@ def run_attack_api(chat_id, user_id, target, port, time_val):
 
 @bot.message_handler(commands=['status'])
 def attack_status(message):
+    user_id = str(message.chat.id)
     tot = len(active_attacks)
     status_msg = f"╔══════════════════════════╗\n║  🔥 <b>𝗔𝗧𝗧𝗔𝗖𝗞 𝗦𝗧𝗔𝗧𝗨𝗦</b> 🔥        ║\n╠══════════════════════════╣\n║  📊 Total Active: {tot}               ║\n╚══════════════════════════╝\n\n"
     if tot == 0: status_msg += "<i>No active attacks right now.</i>"
@@ -618,7 +617,6 @@ def genkey_plan_step(message):
             del active_prompts[user_id]
         return animated_delete(user_id, msg.message_id, delay=5)
         
-    # Clean old prompt and set the new one
     if user_id in active_prompts:
         try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
         except: pass
@@ -630,7 +628,6 @@ def genkey_amount_step(message, plan):
     user_id = str(message.chat.id)
     if is_cancel(message): return
     
-    # 🔥 Self-Cleaning
     if user_id in active_prompts:
         try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
         except: pass
@@ -668,7 +665,6 @@ def execute_genkey(message, plan, amount_str):
     log_action(user_id, f"Generated {amount} key(s) | plan={plan} | cost=₹{total_cost}", message)
     
     msg = bot.send_message(user_id, f"🔑 <b>𝗞𝗘𝗬(𝗦) 𝗚𝗘𝗡𝗘𝗥𝗔𝗧𝗘𝗗!</b>\n\n" + "\n".join([f"<code>{k}</code>" for k in gen_keys]) + f"\n\n📦 <b>Plan:</b> {plan}\n💰 <b>Cost:</b> ₹{total_cost}", parse_mode="HTML")
-    # Leaves the keys visible for 30 seconds before fading out to keep chat clean
     animated_delete(user_id, msg.message_id, delay=30) 
 
 @bot.message_handler(commands=['deletekey'])
@@ -680,7 +676,6 @@ def deletekey_step(message):
     user_id = str(message.chat.id)
     if is_cancel(message): return
     
-    # 🔥 Self-Cleaning
     if user_id in active_prompts:
         try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
         except: pass
@@ -713,14 +708,14 @@ def check_balance(message):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  PAGINATED LIST COMMANDS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  PAGINATED LIST COMMANDS
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @bot.message_handler(commands=['listkeys'])
 def listkeys_cmd(message):
     user_id = str(message.chat.id)
-    if not is_admin_or_reseller(user_id): return bot.send_message(user_id, admin_reseller_only_msg(), parse_mode="HTML")
+    if not is_admin_or_reseller(user_id): 
+        return bot.send_message(user_id, admin_reseller_only_msg(), parse_mode="HTML")
     user_unused_keys = {k: p for k, p in active_keys.items() if is_admin(user_id) or (k in key_history and key_history[k]["creator"] == user_id)}
-    if not user_unused_keys: return bot.send_message(user_id, "⚠️ No unused keys available.", parse_mode="HTML")
+    if not user_unused_keys: 
+        return bot.send_message(user_id, "⚠️ No unused keys available.", parse_mode="HTML")
     send_listkeys_page(message.chat.id, list(user_unused_keys.items()), 0)
 
 def send_listkeys_page(chat_id, keys_list, page, message_id=None):
@@ -745,8 +740,8 @@ def keypage_callback(call):
 
 @bot.message_handler(commands=['resellers'])
 def resellers_cmd(message):
-    if not is_admin(str(message.chat.id)): return bot.send_message(user_id, admin_only_msg(), parse_mode="HTML")
-    if not resellers_data: return bot.send_message(user_id, "⚠️ No resellers found.", parse_mode="HTML")
+    if not is_admin(str(message.chat.id)): return bot.send_message(message.chat.id, admin_only_msg(), parse_mode="HTML")
+    if not resellers_data: return bot.send_message(message.chat.id, "⚠️ No resellers found.", parse_mode="HTML")
     send_resellers_page(message.chat.id, list(resellers_data.items()), 0)
 
 def send_resellers_page(chat_id, res_list, page, message_id=None):
@@ -772,8 +767,8 @@ def respage_callback(call):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @bot.message_handler(commands=['admincmd'])
 def admin_commands(message):
-    if not is_admin(str(message.chat.id)): return bot.send_message(user_id, admin_only_msg(), parse_mode="HTML")
-    bot.send_message(user_id,
+    if not is_admin(str(message.chat.id)): return bot.send_message(message.chat.id, admin_only_msg(), parse_mode="HTML")
+    bot.send_message(message.chat.id,
         "🛠 <b>𝗔𝗗𝗠𝗜𝗡 𝗖𝗢𝗠𝗠𝗔𝗡𝗗𝗦</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
         "👤 <b>USERS</b>\n🔹 /add | /remove\n🔹 /paidusers | /freeusers\n🔹 /extendall\n🔹 /trialkey | /killtrial\n\n"
         "🤝 <b>RESELLERS</b>\n🔸 /addreseller | /rmreseller\n🔸 /resellerstats | /resellers\n🔸 /addbalance | /setbalance\n\n"
@@ -783,158 +778,228 @@ def admin_commands(message):
 
 @bot.message_handler(commands=['add'])
 def add_user_cmd(message):
-    if not is_admin(str(message.chat.id)): return bot.send_message(user_id, admin_only_msg(), parse_mode="HTML")
+    if not is_admin(str(message.chat.id)): return bot.send_message(message.chat.id, admin_only_msg(), parse_mode="HTML")
     parts = message.text.split()
     if len(parts) >= 3: execute_add(message, parts[1], parts[2])
     else:
-        msg = bot.send_message(user_id, "👤 <b>Enter the User ID to add:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
+        msg = bot.send_message(message.chat.id, "👤 <b>Enter the User ID to add:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
+        active_prompts[str(message.chat.id)] = msg.message_id
         bot.register_next_step_handler(msg, add_step_id)
 
 def add_step_id(message):
+    user_id = str(message.chat.id)
     if is_cancel(message): return
     target = message.text.strip()
+    if user_id in active_prompts:
+        try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
+        except: pass
     msg = bot.send_message(user_id, f"📦 <b>Which plan?</b> ({', '.join(KEY_PLANS.keys())})", parse_mode="HTML")
+    active_prompts[user_id] = msg.message_id
     bot.register_next_step_handler(msg, add_step_plan, target)
 
 def add_step_plan(message, target):
+    user_id = str(message.chat.id)
     if is_cancel(message): return
+    if user_id in active_prompts:
+        try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
+        except: pass
+        del active_prompts[user_id]
     execute_add(message, target, message.text.strip())
 
 def execute_add(message, target, plan):
-    if plan not in KEY_PLANS: return bot.send_message(user_id, "❌ Invalid plan.", parse_mode="HTML")
+    user_id = str(message.chat.id)
+    if plan not in KEY_PLANS: 
+        msg = bot.send_message(user_id, "❌ Invalid plan.", parse_mode="HTML")
+        return animated_delete(user_id, msg.message_id, delay=5)
+        
     expiry_ts = (datetime.datetime.now(ist) + KEY_PLANS[plan]["duration"]).timestamp()
     if target not in allowed_user_ids:
         allowed_user_ids.append(target)
         save_users(allowed_user_ids)
         prefix = "✅ <b>User Added</b>"
     else: prefix = "🔄 <b>Access Updated</b>"
+    
     user_access[target] = {"expiry_time": expiry_ts}
     save_user_access(user_access)
     all_known_users.add(target)
     save_file_lines(ALL_USERS_FILE, all_known_users)
-    log_action(str(message.chat.id), f"Added user={target} plan={plan}", message)
-    bot.send_message(user_id, f"{prefix}\n🆔 <b>ID:</b> <code>{target}</code>\n⏳ <b>Expires:</b> {fmt_expiry(expiry_ts)}", parse_mode="HTML")
+    log_action(user_id, f"Added user={target} plan={plan}", message)
+    msg = bot.send_message(user_id, f"{prefix}\n🆔 <b>ID:</b> <code>{target}</code>\n⏳ <b>Expires:</b> {fmt_expiry(expiry_ts)}", parse_mode="HTML")
+    animated_delete(user_id, msg.message_id, delay=10)
 
 @bot.message_handler(commands=['remove', 'rmreseller'])
 def remove_targets_cmd(message):
-    if not is_admin(str(message.chat.id)): return bot.send_message(user_id, admin_only_msg(), parse_mode="HTML")
+    if not is_admin(str(message.chat.id)): return bot.send_message(message.chat.id, admin_only_msg(), parse_mode="HTML")
     cmd = message.text.split()[0].lower()
     parts = message.text.split()
     if len(parts) >= 2: execute_remove(message, cmd, parts[1])
     else:
-        msg = bot.send_message(user_id, f"🗑️ <b>Enter the ID to remove:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
+        msg = bot.send_message(message.chat.id, f"🗑️ <b>Enter the ID to remove:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
+        active_prompts[str(message.chat.id)] = msg.message_id
         bot.register_next_step_handler(msg, remove_step_id, cmd)
 
 def remove_step_id(message, cmd):
+    user_id = str(message.chat.id)
     if is_cancel(message): return
+    if user_id in active_prompts:
+        try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
+        except: pass
+        del active_prompts[user_id]
     execute_remove(message, cmd, message.text.strip())
 
 def execute_remove(message, cmd, target):
+    user_id = str(message.chat.id)
     if cmd == '/remove':
         if target in allowed_user_ids:
             allowed_user_ids.remove(target); user_access.pop(target, None)
             save_users(allowed_user_ids); save_user_access(user_access)
-            bot.send_message(user_id, f"✅ <b>User {target} removed.</b>", parse_mode="HTML")
-        else: bot.send_message(user_id, "❌ User not found.", parse_mode="HTML")
+            msg = bot.send_message(user_id, f"✅ <b>User {target} removed.</b>", parse_mode="HTML")
+        else: msg = bot.send_message(user_id, "❌ User not found.", parse_mode="HTML")
     else:
         if target in resellers_data:
             del resellers_data[target]; save_resellers(resellers_data)
-            bot.send_message(user_id, f"✅ <b>Reseller {target} removed.</b>", parse_mode="HTML")
+            msg = bot.send_message(user_id, f"✅ <b>Reseller {target} removed.</b>", parse_mode="HTML")
+        else: msg = bot.send_message(user_id, "❌ Reseller not found.", parse_mode="HTML")
+    animated_delete(user_id, msg.message_id, delay=5)
 
 @bot.message_handler(commands=['addreseller'])
 def addreseller_cmd(message):
-    if not is_admin(str(message.chat.id)): return bot.send_message(user_id, admin_only_msg(), parse_mode="HTML")
+    if not is_admin(str(message.chat.id)): return bot.send_message(message.chat.id, admin_only_msg(), parse_mode="HTML")
     parts = message.text.split()
     if len(parts) >= 3: execute_addreseller(message, parts[1], parts[2])
     else:
-        msg = bot.send_message(user_id, "🤝 <b>Enter the new Reseller's Telegram ID:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
+        msg = bot.send_message(message.chat.id, "🤝 <b>Enter the new Reseller's Telegram ID:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
+        active_prompts[str(message.chat.id)] = msg.message_id
         bot.register_next_step_handler(msg, addres_step_id)
 
 def addres_step_id(message):
+    user_id = str(message.chat.id)
     if is_cancel(message): return
     target = message.text.strip()
+    if user_id in active_prompts:
+        try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
+        except: pass
     msg = bot.send_message(user_id, "💰 <b>Enter Initial Balance:</b>", parse_mode="HTML")
+    active_prompts[user_id] = msg.message_id
     bot.register_next_step_handler(msg, addres_step_bal, target)
 
 def addres_step_bal(message, target):
+    user_id = str(message.chat.id)
     if is_cancel(message): return
+    if user_id in active_prompts:
+        try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
+        except: pass
+        del active_prompts[user_id]
     execute_addreseller(message, target, message.text.strip())
 
 def execute_addreseller(message, target, bal_str):
+    user_id = str(message.chat.id)
     try: initial_bal = int(bal_str)
-    except ValueError: return bot.send_message(user_id, "❌ Balance must be a number.", parse_mode="HTML")
+    except ValueError: 
+        msg = bot.send_message(user_id, "❌ Balance must be a number.", parse_mode="HTML")
+        return animated_delete(user_id, msg.message_id, delay=5)
     
     resellers_data[target] = "Unknown"
     balances[target] = get_balance(target) + initial_bal
     save_resellers(resellers_data); save_balances(balances)
-    log_action(str(message.chat.id), f"Added reseller={target} with {initial_bal}", message)
+    log_action(user_id, f"Added reseller={target} with {initial_bal}", message)
     
-    bot.send_message(user_id, f"✅ <b>Reseller Added!</b>\n🆔 <b>ID:</b> <code>{target}</code>\n💵 <b>Starting Balance:</b> ₹{balances[target]}\n<i>(Username will auto-update when they use the bot)</i>", parse_mode="HTML")
+    msg = bot.send_message(user_id, f"✅ <b>Reseller Added!</b>\n🆔 <b>ID:</b> <code>{target}</code>\n💵 <b>Starting Balance:</b> ₹{balances[target]}\n<i>(Username will auto-update when they use the bot)</i>", parse_mode="HTML")
+    animated_delete(user_id, msg.message_id, delay=10)
     
-    try:
-        bot.send_message(target, f"💰 <b>𝗬𝗼𝘂 𝗔𝗿𝗲 𝗣𝗿𝗼𝗺𝗼𝘁𝗲𝗱 𝗧𝗼 𝗥𝗲𝘀𝗲𝗹𝗹𝗲𝗿!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n💵 <b>Balance:</b> ₹{balances[target]}\n🔑 <b>Total Keys Generated:</b> 0\n\n📋 <i>Use /prices to see key prices</i>\n🔑 <i>Use /genkey to generate</i>", parse_mode="HTML")
-    except Exception:
-        bot.send_message(user_id, f"⚠️ Note: Promotion message wasn't sent. They need to start the bot first.", parse_mode="HTML")
+    try: bot.send_message(target, f"💰 <b>𝗬𝗼𝘂 𝗔𝗿𝗲 𝗣𝗿𝗼𝗺𝗼𝘁𝗲𝗱 𝗧𝗼 𝗥𝗲𝘀𝗲𝗹𝗹𝗲𝗿!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n💵 <b>Balance:</b> ₹{balances[target]}\n🔑 <b>Total Keys Generated:</b> 0\n\n📋 <i>Use /prices to see key prices</i>\n🔑 <i>Use /genkey to generate</i>", parse_mode="HTML")
+    except Exception: pass
 
 @bot.message_handler(commands=['addbalance', 'setbalance'])
 def addbalance_cmd(message):
-    if not is_admin(str(message.chat.id)): return bot.send_message(user_id, admin_only_msg(), parse_mode="HTML")
+    if not is_admin(str(message.chat.id)): return bot.send_message(message.chat.id, admin_only_msg(), parse_mode="HTML")
     cmd = message.text.split()[0].lower()
     parts = message.text.split()
     if len(parts) >= 3: execute_balance_change(message, cmd, parts[1], parts[2])
     else:
-        msg = bot.send_message(user_id, "👤 <b>Enter the Reseller's Telegram ID:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
+        msg = bot.send_message(message.chat.id, "👤 <b>Enter the Reseller's Telegram ID:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
+        active_prompts[str(message.chat.id)] = msg.message_id
         bot.register_next_step_handler(msg, bal_step_id, cmd)
 
 def bal_step_id(message, cmd):
+    user_id = str(message.chat.id)
     if is_cancel(message): return
     target = message.text.strip()
+    if user_id in active_prompts:
+        try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
+        except: pass
     msg = bot.send_message(user_id, "💰 <b>Enter the amount:</b>", parse_mode="HTML")
+    active_prompts[user_id] = msg.message_id
     bot.register_next_step_handler(msg, bal_step_amt, cmd, target)
 
 def bal_step_amt(message, cmd, target):
+    user_id = str(message.chat.id)
     if is_cancel(message): return
+    if user_id in active_prompts:
+        try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
+        except: pass
+        del active_prompts[user_id]
     execute_balance_change(message, cmd, target, message.text.strip())
 
 def execute_balance_change(message, cmd, target, amount_str):
+    user_id = str(message.chat.id)
     try: amount = int(amount_str)
-    except ValueError: return bot.send_message(user_id, "❌ Amount must be a number.", parse_mode="HTML")
-    if target not in resellers_data: return bot.send_message(user_id, "❌ User is not a reseller.", parse_mode="HTML")
-    if cmd == '/addbalance' and amount <= 0: return bot.send_message(user_id, "❌ Must be > 0.", parse_mode="HTML")
-    if cmd == '/setbalance' and amount < 0: return bot.send_message(user_id, "❌ Must be >= 0.", parse_mode="HTML")
-
+    except ValueError: 
+        msg = bot.send_message(user_id, "❌ Amount must be a number.", parse_mode="HTML")
+        return animated_delete(user_id, msg.message_id, delay=5)
+    if target not in resellers_data: 
+        msg = bot.send_message(user_id, "❌ User is not a reseller.", parse_mode="HTML")
+        return animated_delete(user_id, msg.message_id, delay=5)
+    
     balances[target] = get_balance(target) + amount if cmd == '/addbalance' else amount
     save_balances(balances)
     
-    bot.send_message(user_id, f"✅ <b>𝗕𝗮𝗹𝗮𝗻𝗰𝗲 Updated!</b>\n👤 <b>Reseller:</b> {resellers_data.get(target)} (<code>{target}</code>)\n💵 <b>New Balance:</b> ₹{balances[target]}", parse_mode="HTML")
+    msg = bot.send_message(user_id, f"✅ <b>𝗕𝗮𝗹𝗮𝗻𝗰𝗲 Updated!</b>\n👤 <b>Reseller:</b> {resellers_data.get(target)} (<code>{target}</code>)\n💵 <b>New Balance:</b> ₹{balances[target]}", parse_mode="HTML")
+    animated_delete(user_id, msg.message_id, delay=10)
     try: bot.send_message(target, f"💰 <b>𝗬𝗼𝘂𝗿 𝗕𝗮𝗹𝗮𝗻𝗰𝗲 𝗛𝗮𝘀 𝗕𝗲𝗲𝗻 𝗨𝗽𝗱𝗮𝘁𝗲𝗱!</b>\n💵 <b>Current Balance:</b> ₹{balances[target]}", parse_mode="HTML")
     except: pass
 
 @bot.message_handler(commands=['extendall'])
 def extendall_cmd(message):
-    if not is_admin(str(message.chat.id)): return bot.send_message(user_id, admin_only_msg(), parse_mode="HTML")
+    if not is_admin(str(message.chat.id)): return bot.send_message(message.chat.id, admin_only_msg(), parse_mode="HTML")
     parts = message.text.split()
     if len(parts) >= 3: execute_extendall(message, parts[1], parts[2])
     else:
-        msg = bot.send_message(user_id, "⏳ <b>Enter amount to extend (e.g. 2):</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
+        msg = bot.send_message(message.chat.id, "⏳ <b>Enter amount to extend (e.g. 2):</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
+        active_prompts[str(message.chat.id)] = msg.message_id
         bot.register_next_step_handler(msg, ext_step_amt)
 
 def ext_step_amt(message):
+    user_id = str(message.chat.id)
     if is_cancel(message): return
     amount_str = message.text.strip()
+    if user_id in active_prompts:
+        try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
+        except: pass
     msg = bot.send_message(user_id, "📅 <b>Enter unit (hours or days):</b>", parse_mode="HTML")
+    active_prompts[user_id] = msg.message_id
     bot.register_next_step_handler(msg, ext_step_unit, amount_str)
 
 def ext_step_unit(message, amount_str):
+    user_id = str(message.chat.id)
     if is_cancel(message): return
+    if user_id in active_prompts:
+        try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
+        except: pass
+        del active_prompts[user_id]
     execute_extendall(message, amount_str, message.text.strip())
 
 def execute_extendall(message, amount_str, unit):
+    user_id = str(message.chat.id)
     try: amount = int(amount_str)
-    except: return bot.send_message(user_id, "❌ Amount must be a number.", parse_mode="HTML")
+    except: 
+        msg = bot.send_message(user_id, "❌ Amount must be a number.", parse_mode="HTML")
+        return animated_delete(user_id, msg.message_id, delay=5)
     unit = unit.lower()
     time_to_add = timedelta(hours=amount) if "hour" in unit else (timedelta(days=amount) if "day" in unit else None)
-    if not time_to_add: return bot.send_message(user_id, "❌ Unit must be 'hours' or 'days'.")
+    if not time_to_add: 
+        msg = bot.send_message(user_id, "❌ Unit must be 'hours' or 'days'.", parse_mode="HTML")
+        return animated_delete(user_id, msg.message_id, delay=5)
 
     users_ext, now = 0, time.time()
     for uid in list(user_access.keys()):
@@ -942,17 +1007,24 @@ def execute_extendall(message, amount_str, unit):
             user_access[uid]["expiry_time"] = (datetime.datetime.fromtimestamp(user_access[uid]["expiry_time"]) + time_to_add).timestamp()
             users_ext += 1
     save_user_access(user_access)
-    bot.send_message(user_id, f"🎉 <b>𝗧𝗶𝗺𝗲 𝗘𝘅𝘁𝗲𝗻𝗱𝗲𝗱!</b>\n⏰ <b>Added:</b> {amount} {unit}\n👥 <b>Users Updated:</b> {users_ext}", parse_mode="HTML")
+    msg = bot.send_message(user_id, f"🎉 <b>𝗧𝗶𝗺𝗲 𝗘𝘅𝘁𝗲𝗻𝗱𝗲𝗱!</b>\n⏰ <b>Added:</b> {amount} {unit}\n👥 <b>Users Updated:</b> {users_ext}", parse_mode="HTML")
+    animated_delete(user_id, msg.message_id, delay=10)
 
 @bot.message_handler(commands=['broadcast', 'bcpaid', 'bcreseller'])
 def broadcast_cmd(message):
     if not is_admin(str(message.chat.id)): return
-    bot.send_message(user_id, "📢 <b>Please use the Admin Panel buttons to broadcast.</b>\nClick /start to open the menu.", parse_mode="HTML")
+    msg = bot.send_message(message.chat.id, "📢 <b>Please use the Admin Panel buttons to broadcast.</b>\nClick /start to open the menu.", parse_mode="HTML")
+    animated_delete(message.chat.id, msg.message_id, delay=5)
 
 def broadcast_step(message, target_type):
+    user_id = str(message.chat.id)
+    if user_id in active_prompts:
+        try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
+        except: pass
+        del active_prompts[user_id]
+        
     try: bot.delete_message(message.chat.id, message.message_id) 
     except: pass
-
     if is_cancel(message): return
     execute_broadcast(message, target_type, message.text)
 
@@ -973,8 +1045,7 @@ def execute_broadcast(message, target_type, text_content):
             bot.send_message(t, text, parse_mode="HTML")
             success += 1
             time.sleep(0.05) 
-        except: 
-            fail += 1
+        except: fail += 1
 
     try: bot.delete_message(message.chat.id, loading_msg.message_id)
     except: pass
@@ -982,7 +1053,6 @@ def execute_broadcast(message, target_type, text_content):
     final_msg = bot.send_message(message.chat.id, f"📢 <b>Broadcast Done</b>\n✅ Sent: {success}\n❌ Failed: {fail}", parse_mode="HTML")
     animated_delete(message.chat.id, final_msg.message_id, delay=10)
 
-# Paginated Reports Helpers
 def send_paidusers_page(chat_id, users_list, page, message_id=None):
     per_page = 20
     total_pages = max(1, (len(users_list) + per_page - 1) // per_page)
@@ -1036,7 +1106,7 @@ def rstat_page_callback(call):
 @bot.message_handler(commands=['getdata'])
 def send_database_files(message):
     if not is_admin(str(message.chat.id)): return
-    bot.send_message(user_id, "📦 <b>Fetching Database Files & Building Ledger...</b>", parse_mode="HTML")
+    msg = bot.send_message(message.chat.id, "📦 <b>Fetching Database Files & Building Ledger...</b>", parse_mode="HTML")
     summary_path = os.path.join(DATA_DIR, "Human_Readable_Ledger.txt")
     with open(summary_path, "w", encoding="utf-8") as sf:
         sf.write("========== 📊 MASTER DATABASE SUMMARY ==========\n")
@@ -1059,7 +1129,8 @@ def send_database_files(message):
         if os.path.exists(fp) and os.stat(fp).st_size > 0:
             with open(fp, "rb") as f: bot.send_document(message.chat.id, f, visible_file_name=os.path.basename(fp))
             found = True
-    if not found: bot.send_message(user_id, "⚠️ <b>No data files found yet.</b>", parse_mode="HTML")
+    if not found: bot.send_message(message.chat.id, "⚠️ <b>No data files found yet.</b>", parse_mode="HTML")
+    animated_delete(message.chat.id, msg.message_id, delay=5)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  DANGER ZONE: WIPE DATABASE
@@ -1117,7 +1188,6 @@ def clear_logs_cmd(message):
 def handle_all_buttons(call):
     user_id = str(call.message.chat.id)
     
-    # 🔥 TRUE AUTO-CANCEL: Instantly cleans old prompts if a new menu is clicked
     bot.clear_step_handler_by_chat_id(call.message.chat.id)
     if user_id in active_prompts:
         try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
@@ -1128,7 +1198,6 @@ def handle_all_buttons(call):
     username_str = f"@{call.from_user.username}" if call.from_user.username else "—"
     is_paid = user_id in allowed_user_ids and user_access.get(user_id, {}).get("expiry_time", 0) > time.time()
 
-    # --- MENU NAVIGATION ---
     if action == "menu_main":
         bot.edit_message_text(f"🚀 <b>Main Dashboard</b>", chat_id=user_id, message_id=call.message.message_id, reply_markup=get_main_menu(user_id, is_paid), parse_mode="HTML")
     elif action == "menu_reseller":
@@ -1139,15 +1208,12 @@ def handle_all_buttons(call):
         if not is_admin(user_id): return
         bot.edit_message_text("⚠️ <b>Advanced & Danger Zone</b>", chat_id=user_id, message_id=call.message.message_id, reply_markup=get_danger_menu(), parse_mode="HTML")
 
-    # --- MAIN MENU ACTIONS ---
     elif action == "ui_profile":
         msg = bot.send_message(user_id, build_profile_text(user_id, username_str), parse_mode="HTML")
         animated_delete(user_id, msg.message_id, delay=10)
     elif action == "ui_plan":
-        if not is_paid: 
-            msg = bot.send_message(user_id, no_access_msg(), parse_mode="HTML")
-        else: 
-            msg = bot.send_message(user_id, f"📅 <b>𝗬𝗢𝗨𝗥 𝗣𝗟𝗔𝗡</b>\n⏳ <b>Expires:</b> {fmt_expiry(user_access[user_id]['expiry_time'])}", parse_mode="HTML")
+        if not is_paid: msg = bot.send_message(user_id, no_access_msg(), parse_mode="HTML")
+        else: msg = bot.send_message(user_id, f"📅 <b>𝗬𝗢𝗨𝗥 𝗣𝗟𝗔𝗡</b>\n⏳ <b>Expires:</b> {fmt_expiry(user_access[user_id]['expiry_time'])}", parse_mode="HTML")
         animated_delete(user_id, msg.message_id, delay=8)
     elif action == "ui_rules":
         msg = bot.send_message(user_id, "📜 <b>𝗥𝗨𝗟𝗘𝗦</b>\n1️⃣ No sharing keys.\n2️⃣ One key = one account.\n3️⃣ No refunds.", parse_mode="HTML")
@@ -1167,7 +1233,6 @@ def handle_all_buttons(call):
             active_prompts[user_id] = msg.message_id
             bot.register_next_step_handler(msg, attack_step_ip)
 
-    # --- RESELLER ACTIONS ---
     elif action == "cb_genkey":
         if not is_admin_or_reseller(user_id): return
         msg = bot.send_message(user_id, f"📦 <b>Which plan?</b>\nAvailable: {', '.join(KEY_PLANS.keys())}\n<i>(Type /cancel)</i>", parse_mode="HTML")
@@ -1191,7 +1256,6 @@ def handle_all_buttons(call):
         active_prompts[user_id] = msg.message_id
         bot.register_next_step_handler(msg, deletekey_step)
 
-    # --- ADMIN ACTIONS ---
     elif action == "cb_adduser":
         if not is_admin(user_id): return
         msg = bot.send_message(user_id, "👤 <b>Enter the User ID to add:</b>", parse_mode="HTML")
@@ -1218,7 +1282,6 @@ def handle_all_buttons(call):
         active_prompts[user_id] = msg.message_id
         bot.register_next_step_handler(msg, bal_step_id, '/addbalance')
         
-    # --- BROADCAST SYSTEM ---
     elif action == "cb_broadcast":
         if not is_admin(user_id): return
         bot.edit_message_text("📢 <b>Select Broadcast Target:</b>", chat_id=user_id, message_id=call.message.message_id, reply_markup=get_broadcast_menu(), parse_mode="HTML")
@@ -1229,7 +1292,6 @@ def handle_all_buttons(call):
         active_prompts[user_id] = msg.message_id
         bot.register_next_step_handler(msg, broadcast_step, target_type)
         
-    # --- DANGER ZONE ACTIONS ---
     elif action == "cb_extendall":
         if not is_admin(user_id): return
         msg = bot.send_message(user_id, "⏳ <b>Enter amount to extend (e.g. 2):</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
@@ -1246,7 +1308,6 @@ def handle_all_buttons(call):
         active_prompts[user_id] = msg.message_id
         bot.register_next_step_handler(msg, clearalldata_step)
         
-    # --- REPORTS ---
     elif action == "cb_getdata":
         if not is_admin(user_id): return
         send_database_files(call.message)
@@ -1256,7 +1317,18 @@ def handle_all_buttons(call):
         admin_reports(call.message)
 
     bot.answer_callback_query(call.id)
-    
+
+@bot.message_handler(content_types=['web_app_data'])
+def handle_webapp_data(message):
+    user_id = str(message.chat.id)
+    if user_id not in allowed_user_ids or user_access.get(user_id, {}).get("expiry_time", 0) < time.time():
+        return bot.send_message(user_id, no_access_msg(), parse_mode="HTML")
+    try:
+        data = json.loads(message.web_app_data.data)
+        execute_attack(message, data.get("ip"), int(data.get("port")), int(data.get("time")))
+    except Exception:
+        bot.send_message(user_id, f"❌ Error processing Web App data.", parse_mode="HTML")
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  ENTRY POINT
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
