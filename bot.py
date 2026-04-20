@@ -278,7 +278,7 @@ def remove_expired_users():
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  UI & DASHBOARD MENU
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-@bot.message_handler(commands=['start'])
+
 # --- ANIMATED CLEANUP FUNCTION ---
 def animated_delete(chat_id, message_id, delay=5):
     """Waits a few seconds, shows a cleaning animation, then deletes the message."""
