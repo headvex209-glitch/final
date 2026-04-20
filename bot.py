@@ -785,7 +785,42 @@ def admin_commands(message):
         "🤝 <b>RESELLERS</b>\n🔸 /addreseller | /rmreseller\n🔸 /resellerstats | /resellers\n🔸 /addbalance | /setbalance\n\n"
         "📢 <b>BROADCAST & DATA</b>\n🔊 /broadcast | /bcpaid | /bcreseller\n📄 /logs | 🗑 /clearlogs\n📦 /getdata (Download Full Ledger)\n⚠️ /clearalldata (Wipe Database)\n━━━━━━━━━━━━━━━━━━━━━━",
         parse_mode="HTML"
-    )
+    ) 
+@bot.message_handler(commands=['trialkey'])
+def trialkey_cmd(message):
+    if not is_admin(str(message.chat.id)): return
+    parts = message.text.split()
+    if len(parts) == 3:
+        try:
+            days = float(parts[1])
+            max_uses = int(parts[2])
+            key = generate_key("TRIAL-")
+            trial_keys[key] = {"duration": days * 86400, "max_uses": max_uses, "used_by": []}
+            save_trial_keys(trial_keys)
+            bot.send_message(message.chat.id, f"✅ <b>Trial Key Generated!</b>\n🔑 <code>{key}</code>\n⏳ Duration: {days} days\n👥 Max Uses: {max_uses}", parse_mode="HTML")
+        except:
+            bot.send_message(message.chat.id, "❌ Error in numbers.", parse_mode="HTML")
+    else:
+        bot.send_message(message.chat.id, "❌ Usage: /trialkey <days> <max_uses>\nExample: /trialkey 0.5 10 (12 hours, 10 users)", parse_mode="HTML")
+
+@bot.message_handler(commands=['killtrial'])
+def killtrial_cmd(message):
+    if not is_admin(str(message.chat.id)): return
+    trial_keys.clear()
+    save_trial_keys(trial_keys)
+    
+    expired = []
+    for uid in list(trial_users):
+        if uid in user_access: user_access.pop(uid, None)
+        if uid in allowed_user_ids: allowed_user_ids.remove(uid)
+        expired.append(uid)
+        
+    trial_users.clear()
+    save_file_lines(TRIAL_USERS_FILE, trial_users)
+    save_users(allowed_user_ids)
+    save_user_access(user_access)
+    
+    bot.send_message(message.chat.id, f"🛑 <b>All Trial Keys Killed!</b>\nRemoved access for {len(expired)} trial users.", parse_mode="HTML")
 
 @bot.message_handler(commands=['add'])
 def add_user_cmd(message):
@@ -868,8 +903,10 @@ def execute_remove(message, cmd, target):
         else: msg = bot.send_message(user_id, "❌ User not found.", parse_mode="HTML")
     else:
         if target in resellers_data:
-            del resellers_data[target]; save_resellers(resellers_data)
-            msg = bot.send_message(user_id, f"✅ <b>Reseller {target} removed.</b>", parse_mode="HTML")
+            del resellers_data[target]
+            if target in balances: del balances[target] # 🔥 This wipes their balance!
+            save_resellers(resellers_data); save_balances(balances)
+            msg = bot.send_message(user_id, f"✅ <b>Reseller {target} removed. Balance wiped.</b>", parse_mode="HTML")
         else: msg = bot.send_message(user_id, "❌ Reseller not found.", parse_mode="HTML")
     animated_delete(user_id, msg.message_id, delay=5)
 
@@ -1252,7 +1289,7 @@ def handle_all_buttons(call):
     username_str = f"@{call.from_user.username}" if call.from_user.username else "—"
     is_paid = user_id in allowed_user_ids and user_access.get(user_id, {}).get("expiry_time", 0) > time.time()
 
-    @bot.message_handler(content_types=['web_app_data'])
+    # --- MENU NAVIGATION ---
     try:
         if action == "menu_main":
             bot.edit_message_text(f"🚀 <b>Main Dashboard</b>", chat_id=user_id, message_id=call.message.message_id, reply_markup=get_main_menu(user_id, is_paid), parse_mode="HTML")
@@ -1265,7 +1302,7 @@ def handle_all_buttons(call):
             bot.edit_message_text("⚠️ <b>Advanced & Danger Zone</b>", chat_id=user_id, message_id=call.message.message_id, reply_markup=get_danger_menu(), parse_mode="HTML")
     except Exception:
         pass # 🔥 This stops the "message is not modified" crash!
-
+        
     # --- MAIN MENU ACTIONS ---
     elif action == "ui_profile":
         msg = bot.send_message(user_id, build_profile_text(user_id, username_str), parse_mode="HTML")
@@ -1379,9 +1416,8 @@ def handle_all_buttons(call):
         if not is_admin(user_id): return
         call.message.text = "/" + action.replace("cb_", "") 
         admin_reports(call.message)
-
     bot.answer_callback_query(call.id)
-    
+
 @bot.message_handler(content_types=['web_app_data'])
 def handle_webapp_data(message):
     user_id = str(message.chat.id)
