@@ -567,7 +567,16 @@ def execute_attack(message, target, port_str, time_str):
     active_attacks[user_id] = {"target": f"{target}:{port}", "start_time": time.time(), "duration": time_val}
     log_action(user_id, f"Attack → IP: {target} | Port: {port} | Time: {time_val}s", message)
     
-    bot.send_message(user_id, f"⚡ <b>𝗔𝘁𝘁𝗮𝗰𝗸 𝗦𝘁𝗮𝗿𝘁!</b> ⚡\n🎯 <b>Target:</b> <code>{target}:{port}</code>\n⏱️ <b>Time:</b> {time_val}s", parse_mode="HTML")
+    attack_msg = (
+        "🚀 <b>𝗔𝗧𝗧𝗔𝗖𝗞 𝗜𝗡𝗜𝗧𝗜𝗔𝗧𝗘𝗗!</b> 🚀\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎯 <b>Target:</b> <code>{target}:{port}</code>\n"
+        f"⏱️ <b>Time:</b> {time_val}s\n"
+        f"⏳ <b>Cooldown after attack:</b> 60s\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "📊 <i>/status se live check kro</i> ⚡️"
+    )
+    bot.send_message(user_id, attack_msg, parse_mode="HTML")
     threading.Thread(target=run_attack_api, args=(message.chat.id, user_id, target, port, time_val)).start()
 
 def run_attack_api(chat_id, user_id, target, port, time_val):
