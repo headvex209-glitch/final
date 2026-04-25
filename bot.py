@@ -1622,6 +1622,9 @@ def handle_webapp_data(message):
 app = Flask(__name__)
 CORS(app)
 
+# --- MASTER VERSION CONTROL ---
+APK_CURRENT_VERSION = "2.0.1"
+
 @app.route('/verify-key', methods=['POST'])
 def verify_key():
     data = request.get_json(force=True, silent=True)
@@ -1629,6 +1632,11 @@ def verify_key():
 
     user_key = data.get('key', '').strip()
     user_hwid = data.get('hwid', '').strip()
+    app_version = data.get('version', '').strip()
+
+    # 💥 STRICT VERSION CHECK 💥
+    if app_version != APK_CURRENT_VERSION:
+        return jsonify({"status": "error", "message": "UPDATE REQUIRED: DM RESELLER"}), 426
 
     if not user_key or not user_hwid:
         return jsonify({"status": "error", "message": "Missing info"}), 400
@@ -1642,11 +1650,42 @@ def verify_key():
     if current_status == "DELETED":
         return jsonify({"status": "error", "message": "LICENSE KEY REVOKED"}), 401
 
-    # --- 1. FIRST TIME LOGIN (START THE TIMER) ---
+    # --- 1. FIRST TIME LOGIN (STARTS THE CLOUD TIMER) ---
     if current_status == "UNUSED":
         plan = key_info.get("plan")
         if plan not in APK_KEY_PLANS:
             return jsonify({"status": "error", "message": "UNKNOWN PLAN ERROR"}), 400
+            
+        duration_sec = APK_KEY_PLANS[plan]["duration"].total_seconds()
+        expiry_ts = time.time() + duration_sec # Save absolute end time in cloud
+        
+        user_access[user_hwid] = {"expiry_time": expiry_ts}
+        save_user_access(user_access)
+
+        apk_key_history[user_key]["status"] = f"USED_BY:{user_hwid}"
+        if user_key in active_apk_keys: del active_apk_keys[user_key]
+            
+        save_key_history(APK_HISTORY_FILE, apk_key_history)
+        save_keys(APK_KEYS_FILE, active_apk_keys)
+
+        print(f"[SUCCESS] App Key Activated! {user_key} -> HWID: {user_hwid}")
+        return jsonify({"status": "success", "message": "ACTIVATED & BOUND", "expiry_ts": expiry_ts}), 200
+
+    # --- 2. RETURNING LOGIN (PERSISTENT RE-INSTALL CHECK) ---
+    if current_status.startswith("USED_BY:"):
+        bound_hwid = current_status.split(":")[1]
+        
+        if bound_hwid != user_hwid:
+            return jsonify({"status": "error", "message": "BOUND TO ANOTHER DEVICE"}), 403
+            
+        if user_hwid not in user_access or user_access[user_hwid]["expiry_time"] < time.time():
+            return jsonify({"status": "error", "message": "KEY EXPIRED"}), 401
+            
+        # Fetch the original timer, do NOT restart it!
+        original_expiry = user_access[user_hwid]["expiry_time"]
+        return jsonify({"status": "success", "message": "AUTHENTICATION SUCCESSFUL", "expiry_ts": original_expiry}), 200
+
+    return jsonify({"status": "error", "message": "UNKNOWN KEY ERROR"}), 400
             
         # Calculate exactly when this key expires
         duration_sec = APK_KEY_PLANS[plan]["duration"].total_seconds()
