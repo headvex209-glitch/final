@@ -12,11 +12,17 @@ import json
 from datetime import timedelta
 from threading import Timer
 import pytz
+import sys
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  CONFIG (Optimized Threading)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
+
+if not BOT_TOKEN:
+    print("❌ FATAL ERROR: BOT_TOKEN is missing! Check your host's environment variables.")
+    sys.exit(1)
+
 bot = telebot.TeleBot(BOT_TOKEN, threaded=True, num_threads=32)
 
 # 🔥 ULTRA-FAST UI PATCH 🔥
@@ -155,13 +161,19 @@ def read_resellers() -> dict:
                 line = line.strip()
                 if not line: continue
                 parts = line.split("|")
-                resellers[parts[0]] = parts[1] if len(parts) > 1 else "Unknown"
+                # NEW FORMAT: uid | tier | username
+                if len(parts) >= 3:
+                    resellers[parts[0]] = {"tier": parts[1], "username": parts[2]}
+                # MIGRATION: Auto-converts old data to MASTER
+                elif len(parts) == 2:
+                    resellers[parts[0]] = {"tier": "MASTER", "username": parts[1]}
     except FileNotFoundError: pass
     return resellers
 
 def save_resellers(resellers_dict: dict):
     with open(RESELLERS_FILE, "w") as f:
-        for uid, username in resellers_dict.items(): f.write(f"{uid}|{username}\n")
+        for uid, data in resellers_dict.items(): 
+            f.write(f"{uid}|{data['tier']}|{data['username']}\n")
 
 def read_key_history(filename) -> dict:
     history = {}
@@ -261,12 +273,19 @@ def update_reseller_username(message):
     uid = str(message.chat.id)
     if uid in resellers_data and message.from_user.username:
         new_username = f"@{message.from_user.username}"
-        if resellers_data[uid] != new_username:
-            resellers_data[uid] = new_username
+        if resellers_data[uid]["username"] != new_username:
+            resellers_data[uid]["username"] = new_username
             save_resellers(resellers_data)
 
 def build_profile_text(user_id, username_str):
-    role = "👑 Admin" if is_admin(user_id) else ("🤝 Reseller" if is_reseller(user_id) else "👤 User")
+    if is_admin(user_id):
+        role = "👑 Admin"
+    elif is_reseller(user_id):
+        tier = resellers_data[user_id]["tier"]
+        role = f"🤝 {tier} Reseller"
+    else:
+        role = "👤 User"
+        
     expiry = f"⏳ <b>Expires:</b> {fmt_expiry(user_access[user_id]['expiry_time'])}" if user_id in user_access else "⏳ <b>Expires:</b> ❌ No Active Plan"
     bal = f"\n💵 <b>Balance:</b> ₹{get_balance(user_id)}" if is_reseller(user_id) or is_admin(user_id) else ""
     return f"👤 <b>𝗔𝗖𝗖𝗢𝗨𝗡𝗧 𝗜𝗡𝗙𝗢</b>\n━━━━━━━━━━━━━━━━━━━━━━\n🆔 <b>ID:</b> <code>{user_id}</code>\n📛 <b>Username:</b> {username_str}\n🎭 <b>Role:</b> {role}\n{expiry}{bal}\n━━━━━━━━━━━━━━━━━━━━━━"
@@ -820,7 +839,8 @@ def send_resellers_page(chat_id, res_list, page, message_id=None):
     page_items = res_list[page*per_page : (page+1)*per_page]
     
     text = f"🤝 <b>𝗥𝗘𝗦𝗘𝗟𝗟𝗘𝗥𝗦 (Page {page+1}/{total_pages})</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
-    for uid, username in page_items: text += f"🆔 <code>{uid}</code> ({username}) → ₹{get_balance(uid)}\n"
+    for uid, data in page_items: 
+        text += f"🆔 <code>{uid}</code> ({data['username']} - {data['tier']}) → ₹{get_balance(uid)}\n"
     
     markup = gen_page_markup("respage", page, total_pages)
     if message_id: bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode="HTML")
@@ -845,6 +865,7 @@ def admin_commands(message):
         "📢 <b>BROADCAST & DATA</b>\n🔊 /broadcast | /bcpaid | /bcreseller\n📄 /logs | 🗑 /clearlogs\n📦 /getdata (Download Full Ledger)\n⚠️ /clearalldata (Wipe Database)\n━━━━━━━━━━━━━━━━━━━━━━",
         parse_mode="HTML"
     ) 
+
 @bot.message_handler(commands=['trialkey'])
 def trialkey_cmd(message):
     if not is_admin(str(message.chat.id)): return
@@ -972,12 +993,9 @@ def execute_remove(message, cmd, target):
 @bot.message_handler(commands=['addreseller'])
 def addreseller_cmd(message):
     if not is_admin(str(message.chat.id)): return bot.send_message(message.chat.id, admin_only_msg(), parse_mode="HTML")
-    parts = message.text.split()
-    if len(parts) >= 3: execute_addreseller(message, parts[1], parts[2])
-    else:
-        msg = bot.send_message(message.chat.id, "🤝 <b>Enter the new Reseller's Telegram ID:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
-        active_prompts[str(message.chat.id)] = msg.message_id
-        bot.register_next_step_handler(msg, addres_step_id)
+    msg = bot.send_message(message.chat.id, "🤝 <b>Enter the new Reseller's Telegram ID:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
+    active_prompts[str(message.chat.id)] = msg.message_id
+    bot.register_next_step_handler(msg, addres_step_id)
 
 def addres_step_id(message):
     user_id = str(message.chat.id)
@@ -986,35 +1004,41 @@ def addres_step_id(message):
     if user_id in active_prompts:
         try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
         except: pass
-    msg = bot.send_message(user_id, "💰 <b>Enter Initial Balance:</b>", parse_mode="HTML")
+    
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("🌟 Master (Bot + APK)", callback_data=f"set_tier_{target}_MASTER"),
+        InlineKeyboardButton("🤖 Bot Only", callback_data=f"set_tier_{target}_BOT"),
+        InlineKeyboardButton("📱 APK Only", callback_data=f"set_tier_{target}_APK")
+    )
+    msg = bot.send_message(user_id, f"🎯 <b>Select Tier for ID {target}:</b>", reply_markup=markup, parse_mode="HTML")
     active_prompts[user_id] = msg.message_id
-    bot.register_next_step_handler(msg, addres_step_bal, target)
 
-def addres_step_bal(message, target):
+def addres_step_bal(message, target, tier):
     user_id = str(message.chat.id)
     if is_cancel(message): return
     if user_id in active_prompts:
         try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
         except: pass
         del active_prompts[user_id]
-    execute_addreseller(message, target, message.text.strip())
+    execute_addreseller(message, target, tier, message.text.strip())
 
-def execute_addreseller(message, target, bal_str):
+def execute_addreseller(message, target, tier, bal_str):
     user_id = str(message.chat.id)
     try: initial_bal = int(bal_str)
     except ValueError: 
         msg = bot.send_message(user_id, "❌ Balance must be a number.", parse_mode="HTML")
         return animated_delete(user_id, msg.message_id, delay=5)
     
-    resellers_data[target] = "Unknown"
+    resellers_data[target] = {"tier": tier, "username": "Unknown"}
     balances[target] = get_balance(target) + initial_bal
     save_resellers(resellers_data); save_balances(balances)
-    log_action(user_id, f"Added reseller={target} with {initial_bal}", message)
+    log_action(user_id, f"Added {tier} reseller={target} with {initial_bal}", message)
     
-    msg = bot.send_message(user_id, f"✅ <b>Reseller Added!</b>\n🆔 <b>ID:</b> <code>{target}</code>\n💵 <b>Starting Balance:</b> ₹{balances[target]}\n<i>(Username will auto-update when they use the bot)</i>", parse_mode="HTML")
+    msg = bot.send_message(user_id, f"✅ <b>{tier} Reseller Added!</b>\n🆔 <b>ID:</b> <code>{target}</code>\n💵 <b>Starting Balance:</b> ₹{balances[target]}", parse_mode="HTML")
     animated_delete(user_id, msg.message_id, delay=10)
     
-    try: bot.send_message(target, f"💰 <b>𝗬𝗼𝘂 𝗔𝗿𝗲 𝗣𝗿𝗼𝗺𝗼𝘁𝗲𝗱 𝗧𝗼 𝗥𝗲𝘀𝗲𝗹𝗹𝗲𝗿!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n💵 <b>Balance:</b> ₹{balances[target]}\n🔑 <b>Total Keys Generated:</b> 0\n\n📋 <i>Use /prices to see key prices</i>\n🔑 <i>Use /genkey to generate</i>", parse_mode="HTML")
+    try: bot.send_message(target, f"💰 <b>𝗬𝗼𝘂 𝗔𝗿𝗲 𝗣𝗿𝗼𝗺𝗼𝘁𝗲𝗱 𝗧𝗼 {tier} 𝗥𝗲𝘀𝗲𝗹𝗹𝗲𝗿!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n💵 <b>Balance:</b> ₹{balances[target]}\n🔑 <b>Total Keys Generated:</b> 0\n\n📋 <i>Use /prices to see key prices</i>\n🔑 <i>Use /genkey to generate</i>", parse_mode="HTML")
     except Exception: pass
 
 @bot.message_handler(commands=['addbalance', 'setbalance'])
@@ -1061,7 +1085,8 @@ def execute_balance_change(message, cmd, target, amount_str):
     balances[target] = get_balance(target) + amount if cmd == '/addbalance' else amount
     save_balances(balances)
     
-    msg = bot.send_message(user_id, f"✅ <b>𝗕𝗮𝗹𝗮𝗻𝗰𝗲 Updated!</b>\n👤 <b>Reseller:</b> {resellers_data.get(target)} (<code>{target}</code>)\n💵 <b>New Balance:</b> ₹{balances[target]}", parse_mode="HTML")
+    reseller_uname = resellers_data.get(target, {}).get("username", "Unknown")
+    msg = bot.send_message(user_id, f"✅ <b>𝗕𝗮𝗹𝗮𝗻𝗰𝗲 Updated!</b>\n👤 <b>Reseller:</b> {reseller_uname} (<code>{target}</code>)\n💵 <b>New Balance:</b> ₹{balances[target]}", parse_mode="HTML")
     animated_delete(user_id, msg.message_id, delay=10)
     try: bot.send_message(target, f"💰 <b>𝗬𝗼𝘂𝗿 𝗕𝗮𝗹𝗮𝗻𝗰𝗲 𝗛𝗮𝘀 𝗕𝗲𝗲𝗻 𝗨𝗽𝗱𝗮𝘁𝗲𝗱!</b>\n💵 <b>Current Balance:</b> ₹{balances[target]}", parse_mode="HTML")
     except: pass
@@ -1243,7 +1268,8 @@ def send_rstats_page(chat_id, res_list, page, message_id=None):
     total_pages = max(1, (len(res_list) + per_page - 1) // per_page)
     page_items = res_list[page*per_page : (page+1)*per_page]
     text = f"📊 <b>𝗥𝗘𝗦𝗘𝗟𝗟𝗘𝗥 𝗦𝗧𝗔𝗧𝗦 (Page {page+1}/{total_pages})</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
-    for uid, username in page_items: text += f"👤 {username} (<code>{uid}</code>)\n💵 Bal: ₹{get_balance(uid)} | 🔑 Keys: {count_keys_generated_by(uid)}\n\n"
+    for uid, data in page_items: 
+        text += f"👤 {data['username']} [{data['tier']}] (<code>{uid}</code>)\n💵 Bal: ₹{get_balance(uid)} | 🔑 Keys: {count_keys_generated_by(uid)}\n\n"
     markup = gen_page_markup("rstat", page, total_pages)
     if message_id: bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode="HTML")
     else: bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
@@ -1263,10 +1289,9 @@ def send_database_files(message):
         sf.write("========== 📊 MASTER DATABASE SUMMARY ==========\n")
         sf.write(f"Generated: {datetime.datetime.now(ist).strftime('%d %b %Y %I:%M %p')}\n\n")
         sf.write("========== 🤝 RESELLER LEDGERS ==========\n")
-        for uid, username in resellers_data.items():
-            sf.write(f"Reseller: {username} (ID: {uid})\nLeftover Balance: ₹{get_balance(uid)}\n")
+        for uid, data in resellers_data.items():
+            sf.write(f"Reseller: {data['username']} [{data['tier']}] (ID: {uid})\nLeftover Balance: ₹{get_balance(uid)}\n")
             
-            # Combine Bot and APK Keys in Ledger
             r_keys = {k: v for k, v in key_history.items() if v["creator"] == uid}
             r_apk_keys = {k: v for k, v in apk_key_history.items() if v["creator"] == uid}
             r_all_keys = {**r_keys, **r_apk_keys}
@@ -1442,11 +1467,22 @@ def handle_all_buttons(call):
     # --- RESELLER ACTIONS ---
     elif action == "cb_genkey":
         if not is_admin_or_reseller(user_id): return
+        
+        # Determine User Tier
+        tier = "MASTER"
+        if is_reseller(user_id) and not is_admin(user_id):
+            tier = resellers_data[user_id]["tier"]
+
         markup = InlineKeyboardMarkup()
-        markup.add(
-            InlineKeyboardButton("🤖 BOT Key", callback_data="gen_bot"),
-            InlineKeyboardButton("📱 APK Key", callback_data="gen_apk")
-        )
+        if tier in ["MASTER", "BOT"]:
+            markup.add(InlineKeyboardButton("🤖 BOT Key", callback_data="gen_bot"))
+        if tier in ["MASTER", "APK"]:
+            markup.add(InlineKeyboardButton("📱 APK Key", callback_data="gen_apk"))
+            
+        if not markup.keyboard:
+            msg = bot.send_message(user_id, "❌ Your account is not configured to generate any keys.")
+            return animated_delete(user_id, msg.message_id, delay=5)
+
         bot.edit_message_text("📦 <b>What type of key do you want to generate?</b>", chat_id=user_id, message_id=call.message.message_id, reply_markup=markup, parse_mode="HTML")
         
     elif action in ["gen_bot", "gen_apk"]:
@@ -1491,11 +1527,24 @@ def handle_all_buttons(call):
         msg = bot.send_message(user_id, "🗑️ <b>Enter the User ID to remove:</b>", parse_mode="HTML")
         active_prompts[user_id] = msg.message_id
         bot.register_next_step_handler(msg, remove_step_id, '/remove')
+        
     elif action == "cb_addres":
         if not is_admin(user_id): return
         msg = bot.send_message(user_id, "🤝 <b>Enter new Reseller ID:</b>", parse_mode="HTML")
         active_prompts[user_id] = msg.message_id
         bot.register_next_step_handler(msg, addres_step_id)
+        
+    # NEW TIER SELECTION LOGIC
+    elif action.startswith("set_tier_"):
+        if not is_admin(user_id): return
+        parts = action.split("_")
+        target = parts[2]
+        tier = parts[3]
+        
+        msg = bot.send_message(user_id, f"💰 <b>Enter Initial Balance for {tier} Reseller:</b>", parse_mode="HTML")
+        active_prompts[user_id] = msg.message_id
+        bot.register_next_step_handler(msg, addres_step_bal, target, tier)
+        
     elif action == "cb_rmres":
         if not is_admin(user_id): return
         msg = bot.send_message(user_id, "🛑 <b>Enter Reseller ID to remove:</b>", parse_mode="HTML")
@@ -1570,5 +1619,5 @@ def handle_webapp_data(message):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 if __name__ == "__main__":
     remove_expired_users()
-    print("  ✅ Bot is running perfectly with Dual-Key System Enabled!")
+    print("  ✅ Bot is running perfectly with Tiered Reseller System Enabled!")
     bot.infinity_polling(skip_pending=True, timeout=30, long_polling_timeout=20)
