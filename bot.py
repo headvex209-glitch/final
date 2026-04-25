@@ -1633,37 +1633,56 @@ def verify_key():
     if not user_key or not user_hwid:
         return jsonify({"status": "error", "message": "Missing info"}), 400
 
-    # Read DIRECTLY from the bot's live RAM!
     if user_key not in apk_key_history:
-        return jsonify({"status": "error", "message": "Invalid license key."}), 401
+        return jsonify({"status": "error", "message": "INVALID LICENSE KEY"}), 401
 
     key_info = apk_key_history[user_key]
     current_status = key_info["status"]
 
     if current_status == "DELETED":
-        return jsonify({"status": "error", "message": "License key revoked."}), 401
+        return jsonify({"status": "error", "message": "LICENSE KEY REVOKED"}), 401
 
+    # --- 1. FIRST TIME LOGIN (START THE TIMER) ---
     if current_status == "UNUSED":
-        # 1. Update the Bot's RAM
+        plan = key_info.get("plan")
+        if plan not in APK_KEY_PLANS:
+            return jsonify({"status": "error", "message": "UNKNOWN PLAN ERROR"}), 400
+            
+        # Calculate exactly when this key expires
+        duration_sec = APK_KEY_PLANS[plan]["duration"].total_seconds()
+        expiry_ts = time.time() + duration_sec
+        
+        # Save the HWID and Expiry to the bot's master database
+        user_access[user_hwid] = {"expiry_time": expiry_ts}
+        save_user_access(user_access)
+
+        # Update key to USED
         apk_key_history[user_key]["status"] = f"USED_BY:{user_hwid}"
         if user_key in active_apk_keys:
             del active_apk_keys[user_key]
             
-        # 2. Save it to the text files
         save_key_history(APK_HISTORY_FILE, apk_key_history)
         save_keys(APK_KEYS_FILE, active_apk_keys)
 
-        print(f"[SUCCESS] App Key Activated! {user_key} -> HWID: {user_hwid}")
-        return jsonify({"status": "success", "message": "ACTIVATED & BOUND TO DEVICE"}), 200
+        print(f"[SUCCESS] App Key Activated! {user_key} -> HWID: {user_hwid} | Exp: {expiry_ts}")
+        return jsonify({"status": "success", "message": "ACTIVATED & BOUND"}), 200
 
+    # --- 2. RETURNING LOGIN (CHECK HWID & EXPIRY) ---
     if current_status.startswith("USED_BY:"):
         bound_hwid = current_status.split(":")[1]
-        if bound_hwid == user_hwid:
-            return jsonify({"status": "success", "message": "AUTHENTICATION SUCCESSFUL"}), 200
-        else:
-            return jsonify({"status": "error", "message": "KEY BOUND TO ANOTHER DEVICE"}), 403
+        
+        if bound_hwid != user_hwid:
+            return jsonify({"status": "error", "message": "BOUND TO ANOTHER DEVICE"}), 403
+            
+        # THE STRICT EXPIRY CHECK:
+        # If the HWID was wiped by the bot's auto-cleaner, or the time is passed:
+        if user_hwid not in user_access or user_access[user_hwid]["expiry_time"] < time.time():
+            print(f"[!] EXPIRED LOGIN BLOCKED for HWID: {user_hwid}")
+            return jsonify({"status": "error", "message": "KEY EXPIRED"}), 401
+            
+        return jsonify({"status": "success", "message": "AUTHENTICATION SUCCESSFUL"}), 200
 
-    return jsonify({"status": "error", "message": "Unknown Key Error"}), 400
+    return jsonify({"status": "error", "message": "UNKNOWN KEY ERROR"}), 400
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  ENTRY POINT (DUAL-THREADING)
