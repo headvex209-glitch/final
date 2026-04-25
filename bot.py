@@ -2,6 +2,8 @@
 
 import requests
 import telebot
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 import datetime
 import os
