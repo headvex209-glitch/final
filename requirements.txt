@@ -1,3 +1,5 @@
-requests
 pyTelegramBotAPI
+requests
 pytz
+Flask
+flask-cors
