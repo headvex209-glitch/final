@@ -1385,7 +1385,7 @@ def execute_killtrial(chat_id):
 @bot.callback_query_handler(func=lambda call: True)
 def handle_all_buttons(call):
     user_id = str(call.message.chat.id)
-    track_profile(call.fromuser)
+    track_profile(call.from_user)
     try: bot.answer_callback_query(call.id)
     except: pass
     
