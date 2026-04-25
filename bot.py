@@ -1615,9 +1615,64 @@ def handle_webapp_data(message):
         bot.send_message(user_id, f"❌ Error processing Web App data.", parse_mode="HTML")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  ENTRY POINT
+#  INTEGRATED FLASK API FOR ANDROID APP
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+app = Flask(__name__)
+CORS(app)
+
+@app.route('/verify-key', methods=['POST'])
+def verify_key():
+    data = request.get_json(force=True, silent=True)
+    if not data: return jsonify({"status": "error", "message": "Invalid format"}), 400
+
+    user_key = data.get('key', '').strip()
+    user_hwid = data.get('hwid', '').strip()
+
+    if not user_key or not user_hwid:
+        return jsonify({"status": "error", "message": "Missing info"}), 400
+
+    # Read DIRECTLY from the bot's live RAM!
+    if user_key not in apk_key_history:
+        return jsonify({"status": "error", "message": "Invalid license key."}), 401
+
+    key_info = apk_key_history[user_key]
+    current_status = key_info["status"]
+
+    if current_status == "DELETED":
+        return jsonify({"status": "error", "message": "License key revoked."}), 401
+
+    if current_status == "UNUSED":
+        # 1. Update the Bot's RAM
+        apk_key_history[user_key]["status"] = f"USED_BY:{user_hwid}"
+        if user_key in active_apk_keys:
+            del active_apk_keys[user_key]
+            
+        # 2. Save it to the text files
+        save_key_history(APK_HISTORY_FILE, apk_key_history)
+        save_keys(APK_KEYS_FILE, active_apk_keys)
+
+        print(f"[SUCCESS] App Key Activated! {user_key} -> HWID: {user_hwid}")
+        return jsonify({"status": "success", "message": "ACTIVATED & BOUND TO DEVICE"}), 200
+
+    if current_status.startswith("USED_BY:"):
+        bound_hwid = current_status.split(":")[1]
+        if bound_hwid == user_hwid:
+            return jsonify({"status": "success", "message": "AUTHENTICATION SUCCESSFUL"}), 200
+        else:
+            return jsonify({"status": "error", "message": "KEY BOUND TO ANOTHER DEVICE"}), 403
+
+    return jsonify({"status": "error", "message": "Unknown Key Error"}), 400
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  ENTRY POINT (DUAL-THREADING)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 if __name__ == "__main__":
     remove_expired_users()
-    print("  ✅ Bot is running perfectly with Tiered Reseller System Enabled!")
+    print("  ✅ Bot is running with Tiered Reseller System Enabled!")
+    
+    # Start the Flask API on a background thread so the Bot can still run
+    port = int(os.environ.get("PORT", 5000))
+    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=port, use_reloader=False)).start()
+    
+    # Start the Telegram Bot
     bot.infinity_polling(skip_pending=True, timeout=30, long_polling_timeout=20)
