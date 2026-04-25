@@ -20,7 +20,6 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 bot = telebot.TeleBot(BOT_TOKEN, threaded=True, num_threads=32)
 
 # 🔥 ULTRA-FAST UI PATCH 🔥
-# Forces all deletions into the background so the bot never pauses
 original_delete = bot.delete_message
 def async_delete(*args, **kwargs):
     def task():
@@ -45,6 +44,8 @@ LOG_FILE         = os.path.join(DATA_DIR, "log.txt")
 USER_ACCESS_FILE = os.path.join(DATA_DIR, "users_access.txt")
 KEYS_FILE        = os.path.join(DATA_DIR, "keys.txt")
 KEY_HISTORY_FILE = os.path.join(DATA_DIR, "key_history.txt") 
+APK_KEYS_FILE    = os.path.join(DATA_DIR, "apk_keys.txt")          
+APK_HISTORY_FILE = os.path.join(DATA_DIR, "apk_key_history.txt")   
 RESELLERS_FILE   = os.path.join(DATA_DIR, "resellers.txt") 
 BALANCE_FILE     = os.path.join(DATA_DIR, "balances.txt")
 ALL_USERS_FILE   = os.path.join(DATA_DIR, "all_users.txt")
@@ -53,13 +54,23 @@ TRIAL_USERS_FILE = os.path.join(DATA_DIR, "trial_users.txt")
 PROFILES_FILE    = os.path.join(DATA_DIR, "profiles.txt")
 ist = pytz.timezone('Asia/Kolkata')
 
-KEY_PLANS = {
+# --- UPDATED PRICE LISTS ---
+BOT_KEY_PLANS = {
     "12hr":  {"duration": timedelta(hours=12), "cost": 30},
     "1day":  {"duration": timedelta(days=1),   "cost": 60},
     "3day":  {"duration": timedelta(days=3),   "cost": 180},
     "7day":  {"duration": timedelta(days=7),   "cost": 300},
-    "30day": {"duration": timedelta(days=30),  "cost": 1000},
-    "60day": {"duration": timedelta(days=60),  "cost": 1900},
+    "30day": {"duration": timedelta(days=30),  "cost": 850},
+    "60day": {"duration": timedelta(days=60),  "cost": 9999999999},
+}
+
+APK_KEY_PLANS = {
+    "12hr":  {"duration": timedelta(hours=12), "cost": 40},
+    "1day":  {"duration": timedelta(days=1),   "cost": 70},
+    "3day":  {"duration": timedelta(days=3),   "cost": 180},
+    "7day":  {"duration": timedelta(days=7),   "cost": 350},
+    "30day": {"duration": timedelta(days=30),  "cost": 900},
+    "60day": {"duration": timedelta(days=60),  "cost": 9999999999},
 }
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -85,6 +96,7 @@ def track_profile(user):
     if user_profiles.get(uid) != name:
         user_profiles[uid] = name
         save_profiles(user_profiles)
+
 def read_file_lines(filename) -> set:
     try:
         with open(filename, "r") as f: return {l.strip() for l in f if l.strip()}
@@ -119,10 +131,10 @@ def save_user_access(data: dict):
     with open(USER_ACCESS_FILE, "w") as f:
         for uid, info in data.items(): f.write(f"{uid}:{info['expiry_time']}\n")
 
-def read_keys() -> dict:
+def read_keys(filename) -> dict:
     keys = {}
     try:
-        with open(KEYS_FILE, "r") as f:
+        with open(filename, "r") as f:
             for line in f:
                 line = line.strip()
                 if "|" in line:
@@ -131,8 +143,8 @@ def read_keys() -> dict:
     except FileNotFoundError: pass
     return keys
 
-def save_keys(keys: dict):
-    with open(KEYS_FILE, "w") as f:
+def save_keys(filename, keys: dict):
+    with open(filename, "w") as f:
         for key, plan in keys.items(): f.write(f"{key}|{plan}\n")
 
 def read_resellers() -> dict:
@@ -151,10 +163,10 @@ def save_resellers(resellers_dict: dict):
     with open(RESELLERS_FILE, "w") as f:
         for uid, username in resellers_dict.items(): f.write(f"{uid}|{username}\n")
 
-def read_key_history() -> dict:
+def read_key_history(filename) -> dict:
     history = {}
     try:
-        with open(KEY_HISTORY_FILE, "r") as f:
+        with open(filename, "r") as f:
             for line in f:
                 line = line.strip()
                 if not line: continue
@@ -164,8 +176,8 @@ def read_key_history() -> dict:
     except FileNotFoundError: pass
     return history
 
-def save_key_history(history_dict: dict):
-    with open(KEY_HISTORY_FILE, "w") as f:
+def save_key_history(filename, history_dict: dict):
+    with open(filename, "w") as f:
         for key, data in history_dict.items():
             f.write(f"{key}|{data['plan']}|{data['creator']}|{data['status']}\n")
 
@@ -212,8 +224,10 @@ all_known_users: set   = read_file_lines(ALL_USERS_FILE)
 trial_users: set       = read_file_lines(TRIAL_USERS_FILE)
 allowed_user_ids: list = read_users()
 user_access: dict      = read_user_access()
-active_keys: dict      = read_keys()
-key_history: dict      = read_key_history() 
+active_keys: dict      = read_keys(KEYS_FILE)               
+key_history: dict      = read_key_history(KEY_HISTORY_FILE) 
+active_apk_keys: dict  = read_keys(APK_KEYS_FILE)           
+apk_key_history: dict  = read_key_history(APK_HISTORY_FILE) 
 resellers_data: dict   = read_resellers()   
 trial_keys: dict       = read_trial_keys()
 balances: dict         = read_balances()
@@ -239,7 +253,9 @@ def log_action(user_id: str, action: str, message=None):
     with open(LOG_FILE, "a") as f: f.write(f"[{now}] {username} | {action}\n")
 
 def count_keys_generated_by(user_id: str) -> int:
-    return sum(1 for k, v in key_history.items() if v["creator"] == user_id)
+    bot_keys = sum(1 for k, v in key_history.items() if v["creator"] == user_id)
+    apk_keys = sum(1 for k, v in apk_key_history.items() if v["creator"] == user_id)
+    return bot_keys + apk_keys
 
 def update_reseller_username(message):
     uid = str(message.chat.id)
@@ -257,12 +273,10 @@ def build_profile_text(user_id, username_str):
 
 def is_cancel(message):
     user_id = str(message.chat.id)
-    # 1. Instantly delete the user's typed message
     try: bot.delete_message(message.chat.id, message.message_id)
     except: pass
 
     if not message.text or message.text.startswith('/'):
-        # 2. Delete the Bot's waiting prompt
         if user_id in active_prompts:
             try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
             except: pass
@@ -319,19 +333,13 @@ def remove_expired_users():
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  UI & DASHBOARD MENU
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-# --- ANIMATED CLEANUP FUNCTION ---
 def animated_delete(chat_id, message_id, delay=5):
-    """Waits a few seconds, then quietly deletes the message without UI lag."""
     def task():
         time.sleep(delay)
-        try:
-            bot.delete_message(chat_id, message_id)
-        except Exception:
-            pass
+        try: bot.delete_message(chat_id, message_id)
+        except Exception: pass
     threading.Thread(target=task).start()
 
-# --- DYNAMIC MENUS ---
 def get_main_menu(user_id, is_paid):
     markup = InlineKeyboardMarkup(row_width=2)
     if is_paid:
@@ -364,7 +372,6 @@ def get_reseller_menu():
     markup.add(InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main"))
     return markup
 
-# --- TRACKER FOR TRUE AUTO-CANCEL ---
 active_prompts = {}
 
 def get_admin_menu():
@@ -410,7 +417,6 @@ def get_broadcast_menu():
     markup.add(InlineKeyboardButton("🔙 Back to Admin Panel", callback_data="menu_admin"))
     return markup
 
-# --- MAIN START COMMAND ---
 @bot.message_handler(commands=['start'])
 def welcome_start(message):
     user_id = str(message.chat.id)
@@ -428,24 +434,10 @@ def welcome_start(message):
     else: 
         res = f"🚀 <b>𝗪𝗲𝗹𝗰𝗼𝗺𝗲 𝘁𝗼 𝗣𝗿𝗲𝗺𝗶𝘂𝗺 𝗕𝗼𝘁, {name}!</b> 🚀\n\n⛔ <b>𝗡𝗼 𝗔𝗰𝘁𝗶𝘃𝗲 𝗣𝗹𝗮𝗻</b>\n\n<i>Please click 'Redeem Key' below to activate your access!</i>"
 
-    # 🔥 FIX: Send the menu FIRST so the chat is never empty
     bot.send_message(user_id, res, reply_markup=get_main_menu(user_id, is_paid), parse_mode="HTML")
-    
-    # 🔥 FIX: THEN delete the user's /start message to keep it clean
     try: bot.delete_message(user_id, message.message_id)
     except: pass
     
-@bot.message_handler(content_types=['web_app_data'])
-def handle_webapp_data(message):
-    user_id = str(message.chat.id)
-    if user_id not in allowed_user_ids or user_access.get(user_id, {}).get("expiry_time", 0) < time.time():
-        return bot.send_message(user_id, no_access_msg(), parse_mode="HTML")
-    try:
-        data = json.loads(message.web_app_data.data)
-        execute_attack(message, data.get("ip"), int(data.get("port")), int(data.get("time")))
-    except Exception:
-        bot.send_message(user_id, f"❌ Error processing Web App data.", parse_mode="HTML")
-
 @bot.message_handler(commands=['help'])
 def show_help(message):
     update_reseller_username(message)
@@ -456,7 +448,6 @@ def show_help(message):
 def handle_basic_commands(message):
     msg = bot.send_message(message.chat.id, "Please use the buttons in the /start menu.", parse_mode="HTML")
     animated_delete(message.chat.id, msg.message_id, delay=5)
-
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  CONVERSATIONAL USER COMMANDS
@@ -470,7 +461,6 @@ def redeem_step(message):
     user_id = str(message.chat.id)
     if is_cancel(message): return
     
-    # 🔥 Self-Cleaning: Delete the prompt
     if user_id in active_prompts:
         try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
         except: pass
@@ -484,15 +474,19 @@ def execute_redeem(message, key):
         all_known_users.add(user_id)
         save_file_lines(ALL_USERS_FILE, all_known_users)
 
+    if key.startswith("FZ-APK-"):
+        msg = bot.send_message(user_id, "❌ <b>This is an APK key!</b>\nPlease paste this key directly inside the Android App to login.", parse_mode="HTML")
+        return animated_delete(user_id, msg.message_id, delay=8)
+
     now = datetime.datetime.now(ist)
     if key in active_keys:
         plan_label = active_keys[key]
-        duration_sec = KEY_PLANS[plan_label]["duration"].total_seconds()
+        duration_sec = BOT_KEY_PLANS[plan_label]["duration"].total_seconds()
         if key in key_history:
             key_history[key]["status"] = f"USED_BY:{user_id}"
-            save_key_history(key_history)
+            save_key_history(KEY_HISTORY_FILE, key_history)
         del active_keys[key]
-        save_keys(active_keys)
+        save_keys(KEYS_FILE, active_keys)
         if user_id in trial_users:
             trial_users.remove(user_id)
             save_file_lines(TRIAL_USERS_FILE, trial_users)
@@ -548,8 +542,6 @@ def attack_step_ip(message):
     user_id = str(message.chat.id)
     if is_cancel(message): return
     ip = message.text.strip()
-    
-    # 🔥 Self-Cleaning: Deletes "Enter IP" prompt
     if user_id in active_prompts:
         try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
         except: pass
@@ -562,8 +554,6 @@ def attack_step_port(message, ip):
     user_id = str(message.chat.id)
     if is_cancel(message): return
     port = message.text.strip()
-    
-    # 🔥 Self-Cleaning: Deletes "Enter Port" prompt
     if user_id in active_prompts:
         try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
         except: pass
@@ -575,8 +565,6 @@ def attack_step_port(message, ip):
 def attack_step_time(message, ip, port):
     user_id = str(message.chat.id)
     if is_cancel(message): return
-    
-    # 🔥 Self-Cleaning: Deletes "Enter Duration" prompt
     if user_id in active_prompts:
         try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
         except: pass
@@ -648,12 +636,14 @@ def genkey_cmd(message):
     msg = bot.send_message(message.chat.id, "Please use the Reseller Menu to generate keys.", parse_mode="HTML")
     animated_delete(message.chat.id, msg.message_id, delay=5)
 
-def genkey_plan_step(message):
+def genkey_plan_step(message, key_type):
     user_id = str(message.chat.id)
     if is_cancel(message): return
     
     plan = message.text.strip()
-    if plan not in KEY_PLANS: 
+    plans = BOT_KEY_PLANS if key_type == "BOT" else APK_KEY_PLANS
+
+    if plan not in plans: 
         msg = bot.send_message(user_id, "❌ Invalid plan. Operation cancelled.", parse_mode="HTML")
         if user_id in active_prompts:
             try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
@@ -664,11 +654,11 @@ def genkey_plan_step(message):
     if user_id in active_prompts:
         try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
         except: pass
-    msg = bot.send_message(user_id, "🔢 <b>How many keys do you want to generate?</b> (Enter 1 to 50)", parse_mode="HTML")
+    msg = bot.send_message(user_id, f"🔢 <b>How many {key_type} keys do you want?</b> (Enter 1 to 50)", parse_mode="HTML")
     active_prompts[user_id] = msg.message_id
-    bot.register_next_step_handler(msg, genkey_amount_step, plan)
+    bot.register_next_step_handler(msg, genkey_amount_step, plan, key_type)
 
-def genkey_amount_step(message, plan):
+def genkey_amount_step(message, plan, key_type):
     user_id = str(message.chat.id)
     if is_cancel(message): return
     
@@ -677,11 +667,13 @@ def genkey_amount_step(message, plan):
         except: pass
         del active_prompts[user_id]
         
-    execute_genkey(message, plan, message.text.strip())
+    execute_genkey(message, plan, message.text.strip(), key_type)
 
-def execute_genkey(message, plan, amount_str):
+def execute_genkey(message, plan, amount_str, key_type):
     user_id = str(message.chat.id)
-    if plan not in KEY_PLANS: 
+    plans = BOT_KEY_PLANS if key_type == "BOT" else APK_KEY_PLANS
+
+    if plan not in plans: 
         msg = bot.send_message(user_id, "❌ Invalid Plan.", parse_mode="HTML")
         return animated_delete(user_id, msg.message_id, delay=5)
     try:
@@ -691,7 +683,7 @@ def execute_genkey(message, plan, amount_str):
         msg = bot.send_message(user_id, "❌ Amount must be between 1 and 50.", parse_mode="HTML")
         return animated_delete(user_id, msg.message_id, delay=5)
 
-    total_cost = KEY_PLANS[plan]["cost"] * amount
+    total_cost = plans[plan]["cost"] * amount
     if is_reseller(user_id) and not is_admin(user_id):
         if get_balance(user_id) < total_cost:
             msg = bot.send_message(user_id, f"❌ <b>𝗜𝗡𝗦𝗨𝗙𝗙𝗜𝗖𝗜𝗘𝗡𝗧 𝗕𝗔𝗟𝗔𝗡𝗖𝗘</b>\n💰 Needed: ₹{total_cost} | Bal: ₹{get_balance(user_id)}", parse_mode="HTML")
@@ -699,17 +691,24 @@ def execute_genkey(message, plan, amount_str):
         balances[user_id] -= total_cost
         save_balances(balances)
 
+    prefix = "BOT-" if key_type == "BOT" else "FZ-APK-"
+    target_dict = active_keys if key_type == "BOT" else active_apk_keys
+    target_hist = key_history if key_type == "BOT" else apk_key_history
+    target_file = KEYS_FILE if key_type == "BOT" else APK_KEYS_FILE
+    target_hist_file = KEY_HISTORY_FILE if key_type == "BOT" else APK_HISTORY_FILE
+
     gen_keys = []
     for _ in range(amount):
-        k = generate_key()
-        active_keys[k], key_history[k] = plan, {"plan": plan, "creator": user_id, "status": "UNUSED"}
+        k = generate_key(prefix)
+        target_dict[k], target_hist[k] = plan, {"plan": plan, "creator": user_id, "status": "UNUSED"}
         gen_keys.append(k)
         
-    save_keys(active_keys); save_key_history(key_history)
-    log_action(user_id, f"Generated {amount} key(s) | plan={plan} | cost=₹{total_cost}", message)
+    save_keys(target_file, target_dict)
+    save_key_history(target_hist_file, target_hist)
+
+    log_action(user_id, f"Generated {amount} {key_type} key(s) | plan={plan} | cost=₹{total_cost}", message)
     
-    bot.send_message(user_id, f"🔑 <b>𝗞𝗘𝗬(𝗦) 𝗚𝗘𝗡𝗘𝗥𝗔𝗧𝗘𝗗!</b>\n\n" + "\n".join([f"<code>{k}</code>" for k in gen_keys]) + f"\n\n📦 <b>Plan:</b> {plan}\n💰 <b>Cost:</b> ₹{total_cost}", parse_mode="HTML")
-    # 🔥 The key will now stay in the chat permanently! 
+    bot.send_message(user_id, f"🔑 <b>{key_type} 𝗞𝗘𝗬(𝗦) 𝗚𝗘𝗡𝗘𝗥𝗔𝗧𝗘𝗗!</b>\n\n" + "\n".join([f"<code>{k}</code>" for k in gen_keys]) + f"\n\n📦 <b>Plan:</b> {plan}\n💰 <b>Cost:</b> ₹{total_cost}", parse_mode="HTML")
 
 @bot.message_handler(commands=['deletekey'])
 def delete_key_cmd(message):
@@ -729,20 +728,33 @@ def deletekey_step(message):
 
 def execute_deletekey(message, key_str):
     user_id, key = str(message.chat.id), key_str.upper()
-    if not is_admin(user_id) and key in key_history and key_history[key]["creator"] != user_id:
-        msg = bot.send_message(user_id, "❌ You can only delete keys that you generated.", parse_mode="HTML")
-        return animated_delete(user_id, msg.message_id, delay=5)
-    if key in active_keys:
-        del active_keys[key]
-        save_keys(active_keys)
-        if key in key_history:
+    
+    if key in key_history:
+        if not is_admin(user_id) and key_history[key]["creator"] != user_id:
+            msg = bot.send_message(user_id, "❌ You can only delete keys that you generated.", parse_mode="HTML")
+            return animated_delete(user_id, msg.message_id, delay=5)
+        if key in active_keys:
+            del active_keys[key]
+            save_keys(KEYS_FILE, active_keys)
             key_history[key]["status"] = "DELETED"
-            save_key_history(key_history)
-        msg = bot.send_message(user_id, f"✅ <b>Key successfully deleted.</b>", parse_mode="HTML")
-        animated_delete(user_id, msg.message_id, delay=5)
-    else: 
-        msg = bot.send_message(user_id, "❌ Key not found or already used.", parse_mode="HTML")
-        animated_delete(user_id, msg.message_id, delay=5)
+            save_key_history(KEY_HISTORY_FILE, key_history)
+            msg = bot.send_message(user_id, f"✅ <b>BOT Key successfully deleted.</b>", parse_mode="HTML")
+            return animated_delete(user_id, msg.message_id, delay=5)
+
+    elif key in apk_key_history:
+        if not is_admin(user_id) and apk_key_history[key]["creator"] != user_id:
+            msg = bot.send_message(user_id, "❌ You can only delete keys that you generated.", parse_mode="HTML")
+            return animated_delete(user_id, msg.message_id, delay=5)
+        if key in active_apk_keys:
+            del active_apk_keys[key]
+            save_keys(APK_KEYS_FILE, active_apk_keys)
+            apk_key_history[key]["status"] = "DELETED"
+            save_key_history(APK_HISTORY_FILE, apk_key_history)
+            msg = bot.send_message(user_id, f"✅ <b>APK Key successfully deleted.</b>", parse_mode="HTML")
+            return animated_delete(user_id, msg.message_id, delay=5)
+
+    msg = bot.send_message(user_id, "❌ Key not found or already used.", parse_mode="HTML")
+    animated_delete(user_id, msg.message_id, delay=5)
 
 @bot.message_handler(commands=['balance'])
 def check_balance(message):
@@ -757,10 +769,18 @@ def listkeys_cmd(message):
     user_id = str(message.chat.id)
     if not is_admin_or_reseller(user_id): 
         return bot.send_message(user_id, admin_reseller_only_msg(), parse_mode="HTML")
-    user_unused_keys = {k: p for k, p in active_keys.items() if is_admin(user_id) or (k in key_history and key_history[k]["creator"] == user_id)}
+    
+    user_unused_keys = []
+    for k, p in active_keys.items():
+        if is_admin(user_id) or (k in key_history and key_history[k]["creator"] == user_id):
+            user_unused_keys.append((k, f"{p} [BOT]"))
+    for k, p in active_apk_keys.items():
+        if is_admin(user_id) or (k in apk_key_history and apk_key_history[k]["creator"] == user_id):
+            user_unused_keys.append((k, f"{p} [APK]"))
+
     if not user_unused_keys: 
         return bot.send_message(user_id, "⚠️ No unused keys available.", parse_mode="HTML")
-    send_listkeys_page(message.chat.id, list(user_unused_keys.items()), 0)
+    send_listkeys_page(message.chat.id, user_unused_keys, 0)
 
 def send_listkeys_page(chat_id, keys_list, page, message_id=None):
     per_page = 15
@@ -778,8 +798,14 @@ def send_listkeys_page(chat_id, keys_list, page, message_id=None):
 def keypage_callback(call):
     page = int(call.data.split("_")[1])
     user_id = str(call.message.chat.id)
-    user_unused_keys = {k: p for k, p in active_keys.items() if is_admin(user_id) or (k in key_history and key_history[k]["creator"] == user_id)}
-    send_listkeys_page(call.message.chat.id, list(user_unused_keys.items()), page, call.message.message_id)
+    user_unused_keys = []
+    for k, p in active_keys.items():
+        if is_admin(user_id) or (k in key_history and key_history[k]["creator"] == user_id):
+            user_unused_keys.append((k, f"{p} [BOT]"))
+    for k, p in active_apk_keys.items():
+        if is_admin(user_id) or (k in apk_key_history and apk_key_history[k]["creator"] == user_id):
+            user_unused_keys.append((k, f"{p} [APK]"))
+    send_listkeys_page(call.message.chat.id, user_unused_keys, page, call.message.message_id)
     bot.answer_callback_query(call.id)
 
 @bot.message_handler(commands=['resellers'])
@@ -872,7 +898,7 @@ def add_step_id(message):
     if user_id in active_prompts:
         try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
         except: pass
-    msg = bot.send_message(user_id, f"📦 <b>Which plan?</b> ({', '.join(KEY_PLANS.keys())})", parse_mode="HTML")
+    msg = bot.send_message(user_id, f"📦 <b>Which plan?</b> ({', '.join(BOT_KEY_PLANS.keys())})", parse_mode="HTML")
     active_prompts[user_id] = msg.message_id
     bot.register_next_step_handler(msg, add_step_plan, target)
 
@@ -887,11 +913,11 @@ def add_step_plan(message, target):
 
 def execute_add(message, target, plan):
     user_id = str(message.chat.id)
-    if plan not in KEY_PLANS: 
+    if plan not in BOT_KEY_PLANS: 
         msg = bot.send_message(user_id, "❌ Invalid plan.", parse_mode="HTML")
         return animated_delete(user_id, msg.message_id, delay=5)
         
-    expiry_ts = (datetime.datetime.now(ist) + KEY_PLANS[plan]["duration"]).timestamp()
+    expiry_ts = (datetime.datetime.now(ist) + BOT_KEY_PLANS[plan]["duration"]).timestamp()
     if target not in allowed_user_ids:
         allowed_user_ids.append(target)
         save_users(allowed_user_ids)
@@ -937,7 +963,7 @@ def execute_remove(message, cmd, target):
     else:
         if target in resellers_data:
             del resellers_data[target]
-            if target in balances: del balances[target] # 🔥 This wipes their balance!
+            if target in balances: del balances[target] 
             save_resellers(resellers_data); save_balances(balances)
             msg = bot.send_message(user_id, f"✅ <b>Reseller {target} removed. Balance wiped.</b>", parse_mode="HTML")
         else: msg = bot.send_message(user_id, "❌ Reseller not found.", parse_mode="HTML")
@@ -1133,6 +1159,7 @@ def execute_broadcast(message, target_type, text_content):
 
     final_msg = bot.send_message(message.chat.id, f"📢 <b>Broadcast Done</b>\n✅ Sent: {success}\n❌ Failed: {fail}", parse_mode="HTML")
     animated_delete(message.chat.id, final_msg.message_id, delay=10)
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  ADMIN REPORTS & STATS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1238,18 +1265,25 @@ def send_database_files(message):
         sf.write("========== 🤝 RESELLER LEDGERS ==========\n")
         for uid, username in resellers_data.items():
             sf.write(f"Reseller: {username} (ID: {uid})\nLeftover Balance: ₹{get_balance(uid)}\n")
+            
+            # Combine Bot and APK Keys in Ledger
             r_keys = {k: v for k, v in key_history.items() if v["creator"] == uid}
-            unused, used = [k for k, v in r_keys.items() if v["status"] == "UNUSED"], [k for k, v in r_keys.items() if str(v["status"]).startswith("USED")]
-            sf.write(f"Total Keys Generated: {len(r_keys)}\n  🟢 Unused Keys ({len(unused)}):\n")
-            for k in unused: sf.write(f"    - {k} [{r_keys[k]['plan']}]\n")
+            r_apk_keys = {k: v for k, v in apk_key_history.items() if v["creator"] == uid}
+            r_all_keys = {**r_keys, **r_apk_keys}
+            
+            unused = [k for k, v in r_all_keys.items() if v["status"] == "UNUSED"]
+            used = [k for k, v in r_all_keys.items() if str(v["status"]).startswith("USED")]
+            
+            sf.write(f"Total Keys Generated: {len(r_all_keys)}\n  🟢 Unused Keys ({len(unused)}):\n")
+            for k in unused: sf.write(f"    - {k} [{r_all_keys[k]['plan']}]\n")
             sf.write(f"  🔴 Used Keys ({len(used)}):\n")
-            for k in used: sf.write(f"    - {k} [{r_keys[k]['plan']}] -> {r_keys[k]['status']}\n")
+            for k in used: sf.write(f"    - {k} [{r_all_keys[k]['plan']}] -> {r_all_keys[k]['status']}\n")
             sf.write("-" * 45 + "\n\n")
         sf.write("========== 👤 ACTIVE PREMIUM USERS ==========\n")
         for uid, info in user_access.items(): sf.write(f"ID: {uid} | Expiry: {fmt_expiry(info['expiry_time'])}\n")
     
     found = False
-    for fp in [summary_path, USER_ACCESS_FILE, KEYS_FILE, RESELLERS_FILE, BALANCE_FILE, ALL_USERS_FILE, TRIAL_KEYS_FILE, TRIAL_USERS_FILE, LOG_FILE]:
+    for fp in [summary_path, USER_ACCESS_FILE, KEYS_FILE, APK_KEYS_FILE, RESELLERS_FILE, BALANCE_FILE, ALL_USERS_FILE, TRIAL_KEYS_FILE, TRIAL_USERS_FILE, LOG_FILE]:
         if os.path.exists(fp) and os.stat(fp).st_size > 0:
             with open(fp, "rb") as f: bot.send_document(message.chat.id, f, visible_file_name=os.path.basename(fp))
             found = True
@@ -1278,9 +1312,10 @@ def clearalldata_step(message):
     if message.text.strip() == "CONFIRM WIPE":
         all_known_users.clear(); trial_users.clear(); allowed_user_ids.clear()
         user_access.clear(); active_keys.clear(); key_history.clear()
+        active_apk_keys.clear(); apk_key_history.clear()
         resellers_data.clear(); trial_keys.clear(); balances.clear()
         
-        files_to_wipe = [USER_FILE, LOG_FILE, USER_ACCESS_FILE, KEYS_FILE, KEY_HISTORY_FILE, RESELLERS_FILE, BALANCE_FILE, ALL_USERS_FILE, TRIAL_KEYS_FILE, TRIAL_USERS_FILE]
+        files_to_wipe = [USER_FILE, LOG_FILE, USER_ACCESS_FILE, KEYS_FILE, KEY_HISTORY_FILE, APK_KEYS_FILE, APK_HISTORY_FILE, RESELLERS_FILE, BALANCE_FILE, ALL_USERS_FILE, TRIAL_KEYS_FILE, TRIAL_USERS_FILE]
         for f in files_to_wipe:
             if os.path.exists(f): open(f, 'w').close()
             
@@ -1306,6 +1341,7 @@ def clear_logs_cmd(message):
     if os.path.exists(LOG_FILE): open(LOG_FILE, "w").close()
     msg = bot.send_message(message.chat.id, "✅ <b>Logs wiped.</b>", parse_mode="HTML")
     animated_delete(message.chat.id, msg.message_id, delay=5)
+
 def trialkey_step(message):
     user_id = str(message.chat.id)
     if is_cancel(message): return
@@ -1323,7 +1359,6 @@ def trialkey_step(message):
             trial_keys[key] = {"duration": days * 86400, "max_uses": max_uses, "used_by": []}
             save_trial_keys(trial_keys)
             bot.send_message(user_id, f"✅ <b>Trial Key Generated!</b>\n🔑 <code>{key}</code>\n⏳ Duration: {days} days\n👥 Max Uses: {max_uses}", parse_mode="HTML")
-            # 🔥 The trial key will now stay in the chat permanently!
         except:
             msg = bot.send_message(user_id, "❌ Error in numbers. Try again.", parse_mode="HTML")
             animated_delete(user_id, msg.message_id, delay=5)
@@ -1350,12 +1385,10 @@ def execute_killtrial(chat_id):
 @bot.callback_query_handler(func=lambda call: True)
 def handle_all_buttons(call):
     user_id = str(call.message.chat.id)
-    track_profile(call.from_user)
-    # 🔥 INSTANT UI FIX: Stops the mobile loading spinner immediately! 🔥
+    track_profile(call.fromuser)
     try: bot.answer_callback_query(call.id)
     except: pass
     
-    # 🔥 TRUE AUTO-CANCEL: Instantly cleans old prompts if a new menu is clicked
     bot.clear_step_handler_by_chat_id(call.message.chat.id)
     if user_id in active_prompts:
         try: bot.delete_message(chat_id=user_id, message_id=active_prompts[user_id])
@@ -1378,7 +1411,7 @@ def handle_all_buttons(call):
             if not is_admin(user_id): return
             bot.edit_message_text("⚠️ <b>Advanced & Danger Zone</b>", chat_id=user_id, message_id=call.message.message_id, reply_markup=get_danger_menu(), parse_mode="HTML")
     except Exception:
-        pass # 🔥 This stops the "message is not modified" crash!
+        pass 
         
     # --- MAIN MENU ACTIONS ---
     if action == "ui_profile":
@@ -1409,21 +1442,38 @@ def handle_all_buttons(call):
     # --- RESELLER ACTIONS ---
     elif action == "cb_genkey":
         if not is_admin_or_reseller(user_id): return
-        msg = bot.send_message(user_id, f"📦 <b>Which plan?</b>\nAvailable: {', '.join(KEY_PLANS.keys())}\n<i>(Type /cancel)</i>", parse_mode="HTML")
+        markup = InlineKeyboardMarkup()
+        markup.add(
+            InlineKeyboardButton("🤖 BOT Key", callback_data="gen_bot"),
+            InlineKeyboardButton("📱 APK Key", callback_data="gen_apk")
+        )
+        bot.edit_message_text("📦 <b>What type of key do you want to generate?</b>", chat_id=user_id, message_id=call.message.message_id, reply_markup=markup, parse_mode="HTML")
+        
+    elif action in ["gen_bot", "gen_apk"]:
+        if not is_admin_or_reseller(user_id): return
+        key_type = "BOT" if action == "gen_bot" else "APK"
+        plans = BOT_KEY_PLANS if key_type == "BOT" else APK_KEY_PLANS
+        msg = bot.send_message(user_id, f"📦 <b>Which {key_type} plan?</b>\nAvailable: {', '.join(plans.keys())}\n<i>(Type /cancel)</i>", parse_mode="HTML")
         active_prompts[user_id] = msg.message_id
-        bot.register_next_step_handler(msg, genkey_plan_step)
+        bot.register_next_step_handler(msg, genkey_plan_step, key_type)
+        
     elif action == "cb_listkeys":
         if not is_admin_or_reseller(user_id): return
         listkeys_cmd(call.message) 
+        
     elif action == "cb_balance":
         if not is_admin_or_reseller(user_id): return
         msg = bot.send_message(user_id, f"💰 <b>Your Balance:</b> ₹{get_balance(user_id)}", parse_mode="HTML")
         animated_delete(user_id, msg.message_id, delay=8)
+        
     elif action == "cb_prices":
-        lines = ["💰 <b>𝗞𝗘𝗬 𝗣𝗥𝗜𝗖𝗘 𝗟𝗜𝗦𝗧</b>\n━━━━━━━━━━━━━━━━━━━━━━"]
-        for plan, info in KEY_PLANS.items(): lines.append(f"📦 <b>{plan.ljust(8)}</b> - ₹{info['cost']}")
+        lines = ["💰 <b>𝗕𝗢𝗧 𝗞𝗘𝗬 𝗣𝗥𝗜𝗖𝗘𝗦</b>\n━━━━━━━━━━━━━━━━━━━━━━"]
+        for plan, info in BOT_KEY_PLANS.items(): lines.append(f"🤖 <b>{plan.ljust(8)}</b> - ₹{info['cost']}")
+        lines.append("\n💰 <b>𝗔𝗣𝗞 𝗞𝗘𝗬 𝗣𝗥𝗜𝗖𝗘𝗦</b>\n━━━━━━━━━━━━━━━━━━━━━━")
+        for plan, info in APK_KEY_PLANS.items(): lines.append(f"📱 <b>{plan.ljust(8)}</b> - ₹{info['cost']}")
         msg = bot.send_message(user_id, "\n".join(lines), parse_mode="HTML")
         animated_delete(user_id, msg.message_id, delay=15)
+        
     elif action == "cb_delkey":
         if not is_admin_or_reseller(user_id): return
         msg = bot.send_message(user_id, "🗑️ <b>Enter the key to delete:</b>", parse_mode="HTML")
@@ -1520,5 +1570,5 @@ def handle_webapp_data(message):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 if __name__ == "__main__":
     remove_expired_users()
-    print("   ✅ Bot is running perfectly with Pagination & Threading Enabled!")
+    print("  ✅ Bot is running perfectly with Dual-Key System Enabled!")
     bot.infinity_polling(skip_pending=True, timeout=30, long_polling_timeout=20)
