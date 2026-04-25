@@ -240,7 +240,7 @@ allowed_user_ids: list = read_users()
 user_access: dict      = read_user_access()
 active_keys: dict      = read_keys(KEYS_FILE)               
 key_history: dict      = read_key_history(KEY_HISTORY_FILE) 
-active_apk_keys: dict  = read_keys(APK_KEYS_FILE)           
+active_apk_keys: dict  = read_keys(APK_KEYS_FILE)            
 apk_key_history: dict  = read_key_history(APK_HISTORY_FILE) 
 resellers_data: dict   = read_resellers()   
 trial_keys: dict       = read_trial_keys()
@@ -638,7 +638,7 @@ def run_attack_api(chat_id, user_id, target, port, time_val):
 def attack_status(message):
     user_id = str(message.chat.id)
     tot = len(active_attacks)
-    status_msg = f"╔══════════════════════════╗\n║  🔥 <b>𝗔𝗧𝗧𝗔𝗖𝗞 𝗦𝗧𝗔𝗧𝗨𝗦</b> 🔥        ║\n╠══════════════════════════╣\n║  📊 Total Active: {tot}               ║\n╚══════════════════════════╝\n\n"
+    status_msg = f"╔══════════════════════════╗\n║  🔥 <b>𝗔𝗧𝗧𝗔𝗖𝗞 𝗦𝗧𝗔𝗧𝗨𝗦</b> 🔥        ║\n╠══════════════════════════╣\n║  📊 Total Active: {tot}                ║\n╚══════════════════════════╝\n\n"
     if tot == 0: status_msg += "<i>No active attacks right now.</i>"
     else:
         now = time.time()
@@ -1658,7 +1658,7 @@ def verify_key():
             
         # Calculate exactly when this key expires
         duration_sec = APK_KEY_PLANS[plan]["duration"].total_seconds()
-        expiry_ts = time.time() + duration_sec # Save absolute end time in cloud
+        expiry_ts = time.time() + duration_sec
         
         # Save the HWID and Expiry to the bot's master database
         user_access[user_hwid] = {"expiry_time": expiry_ts}
@@ -1690,78 +1690,6 @@ def verify_key():
         return jsonify({"status": "success", "message": "AUTHENTICATION SUCCESSFUL", "expiry_ts": original_expiry}), 200
 
     # Fallback
-    return jsonify({"status": "error", "message": "UNKNOWN KEY ERROR"}), 400
-    # --- 1. FIRST TIME LOGIN (STARTS THE CLOUD TIMER) ---
-    if current_status == "UNUSED":
-        plan = key_info.get("plan")
-        if plan not in APK_KEY_PLANS:
-            return jsonify({"status": "error", "message": "UNKNOWN PLAN ERROR"}), 400
-            
-        duration_sec = APK_KEY_PLANS[plan]["duration"].total_seconds()
-        expiry_ts = time.time() + duration_sec # Save absolute end time in cloud
-        
-        user_access[user_hwid] = {"expiry_time": expiry_ts}
-        save_user_access(user_access)
-
-        apk_key_history[user_key]["status"] = f"USED_BY:{user_hwid}"
-        if user_key in active_apk_keys: del active_apk_keys[user_key]
-            
-        save_key_history(APK_HISTORY_FILE, apk_key_history)
-        save_keys(APK_KEYS_FILE, active_apk_keys)
-
-        print(f"[SUCCESS] App Key Activated! {user_key} -> HWID: {user_hwid}")
-        return jsonify({"status": "success", "message": "ACTIVATED & BOUND", "expiry_ts": expiry_ts}), 200
-
-    # --- 2. RETURNING LOGIN (PERSISTENT RE-INSTALL CHECK) ---
-    if current_status.startswith("USED_BY:"):
-        bound_hwid = current_status.split(":")[1]
-        
-        if bound_hwid != user_hwid:
-            return jsonify({"status": "error", "message": "BOUND TO ANOTHER DEVICE"}), 403
-            
-        if user_hwid not in user_access or user_access[user_hwid]["expiry_time"] < time.time():
-            return jsonify({"status": "error", "message": "KEY EXPIRED"}), 401
-            
-        # Fetch the original timer, do NOT restart it!
-        original_expiry = user_access[user_hwid]["expiry_time"]
-        return jsonify({"status": "success", "message": "AUTHENTICATION SUCCESSFUL", "expiry_ts": original_expiry}), 200
-
-    return jsonify({"status": "error", "message": "UNKNOWN KEY ERROR"}), 400
-            
-        # Calculate exactly when this key expires
-        duration_sec = APK_KEY_PLANS[plan]["duration"].total_seconds()
-        expiry_ts = time.time() + duration_sec
-        
-        # Save the HWID and Expiry to the bot's master database
-        user_access[user_hwid] = {"expiry_time": expiry_ts}
-        save_user_access(user_access)
-
-        # Update key to USED
-        apk_key_history[user_key]["status"] = f"USED_BY:{user_hwid}"
-        if user_key in active_apk_keys:
-            del active_apk_keys[user_key]
-            
-        save_key_history(APK_HISTORY_FILE, apk_key_history)
-        save_keys(APK_KEYS_FILE, active_apk_keys)
-
-        print(f"[SUCCESS] App Key Activated! {user_key} -> HWID: {user_hwid} | Exp: {expiry_ts}")
-        return jsonify({"status": "success", "message": "ACTIVATED & BOUND"}), 200
-
-    # --- 2. RETURNING LOGIN (CHECK HWID & EXPIRY) ---
-    if current_status.startswith("USED_BY:"):
-        bound_hwid = current_status.split(":")[1]
-        
-        if bound_hwid != user_hwid:
-            return jsonify({"status": "error", "message": "BOUND TO ANOTHER DEVICE"}), 403
-            
-        # THE STRICT EXPIRY CHECK:
-        # If the HWID was wiped by the bot's auto-cleaner, or the time is passed:
-        if user_hwid not in user_access or user_access[user_hwid]["expiry_time"] < time.time():
-            print(f"[!] EXPIRED LOGIN BLOCKED for HWID: {user_hwid}")
-            return jsonify({"status": "error", "message": "KEY EXPIRED"}), 401
-            
-        return jsonify({"status": "success", "message": "AUTHENTICATION SUCCESSFUL"}), 200
-
     return jsonify({"status": "error", "message": "UNKNOWN KEY ERROR"}), 400
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
