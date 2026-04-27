@@ -624,7 +624,8 @@ def execute_attack(message, target, port_str, time_str):
     )
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🛑 Stop Attack", callback_data="stop_attack_btn"))
-    bot.send_message(user_id, attack_msg, parse_mode="HTML")
+    # 💥 ADDED: reply_markup=markup
+    bot.send_message(user_id, attack_msg, reply_markup=markup, parse_mode="HTML") 
     threading.Thread(target=run_attack_api, args=(message.chat.id, user_id, target, port, time_val)).start()
 
 def run_attack_api(chat_id, user_id, target, port, time_val):
